@@ -1,13 +1,14 @@
-// The bar at the bottom of the map: turn counter, both sides' live
-// scores, lock-orders / resolve-turn controls. State machine:
+// The bar at the bottom of the map: match timer, turn counter, both
+// sides' live scores, lock-orders / resolve-turn controls. State
+// machine:
 //
-//   QUEUEING_BLUE  -> [LOCK BLUE]    (greyed if blue queue empty? no -
-//                                     auto-fill HOLD on the server)
+//   QUEUEING_BLUE  -> [LOCK BLUE]
 //   BLUE_LOCKED    -> [LOCK RED]     auto-switches viewmode to RED
 //   RED_LOCKED     -> [RESOLVE TURN] pulse animation
 //
 // RESOLVING -> spinner; cleared when /api/resolve returns + state refetches.
 import { useStore } from '../store'
+import { TimerPill } from './Timer'
 
 export function TurnBar() {
   const game = useStore((s) => s.game)
@@ -37,16 +38,24 @@ export function TurnBar() {
   const redLocked = turnInfo.red_locked
   const canResolve = blueLocked && redLocked && !resolving
 
+  const startMatch = useStore((s) => s.startMatch)
   const lockBlue = async () => {
+    startMatch()
     await lockSide('blue')
     if (viewMode !== 'red') setViewMode('red')
   }
   const lockRed = async () => {
+    startMatch()
     await lockSide('red')
   }
 
   return (
     <div className="h-12 bg-panel border-t border-line flex items-center px-4 gap-3 font-mono text-[11px]">
+      {/* Match clock */}
+      <TimerPill />
+
+      <div className="w-px h-5 bg-line" />
+
       {/* Turn counter */}
       <div className="flex items-baseline gap-2">
         <span className="text-mute tracking-widest">TURN</span>

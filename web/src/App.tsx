@@ -3,6 +3,33 @@ import { useStore } from './store'
 import { MapStage } from './components/MapStage'
 import { TopBar, RightRail } from './components/HUD'
 import { TurnBar } from './components/TurnBar'
+import { EndGameOverlay } from './components/EndGameOverlay'
+import { useMatchTimer } from './components/Timer'
+
+
+/** Watch turnInfo for annihilation conditions and end the match if so. */
+function useAnnihilationCheck() {
+  const turnInfo = useStore((s) => s.turnInfo)
+  const game = useStore((s) => s.game)
+  const gameOver = useStore((s) => s.gameOver)
+  const matchStarted = useStore((s) => s.matchStarted)
+  const endMatch = useStore((s) => s.endMatch)
+  useEffect(() => {
+    if (!turnInfo || !game || gameOver || !matchStarted) return
+    if (turnInfo.blue_score <= 0 || turnInfo.red_score <= 0) {
+      const winner =
+        turnInfo.blue_score === turnInfo.red_score ? 'draw' :
+        turnInfo.blue_score > turnInfo.red_score ? 'blue' : 'red'
+      endMatch({
+        winner,
+        reason: 'annihilation',
+        blue_score: turnInfo.blue_score,
+        red_score: turnInfo.red_score,
+        turn: turnInfo.turn,
+      })
+    }
+  }, [turnInfo?.blue_score, turnInfo?.red_score, gameOver, matchStarted])
+}
 
 
 function useGlobalShortcuts() {
@@ -66,6 +93,8 @@ export default function App() {
   const refetchState = useStore((s) => s.refetchState)
 
   useGlobalShortcuts()
+  useMatchTimer()
+  useAnnihilationCheck()
 
   // On mount: fetch the region list (for the picker) + the initial state.
   useEffect(() => {
@@ -93,6 +122,7 @@ export default function App() {
         </div>
         <RightRail />
         {swapping && <SwapOverlay />}
+        <EndGameOverlay />
       </div>
       <BottomBar />
     </div>

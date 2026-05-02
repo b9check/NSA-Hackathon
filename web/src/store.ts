@@ -47,6 +47,12 @@ interface AppState {
    *  syncUnits doesn't snap positions and clobber move tweens. */
   replaying: boolean
 
+  // Match timer (5 minutes total budget; pauses during replay / game-over).
+  matchSeconds: number       // total budget
+  matchElapsed: number       // seconds already spent
+  matchStarted: boolean
+  gameOver: GameOverInfo | null
+
   setGame: (g: GameState) => void
   selectUnit: (id: string | null) => void
   setHover: (h: { col: number; row: number } | null) => void
@@ -75,6 +81,20 @@ interface AppState {
 
   setPendingEvents: (events: any[] | null) => void
   setReplaying: (b: boolean) => void
+
+  startMatch: () => void
+  tickMatch: (dt: number) => void   // dt in seconds
+  resetMatch: () => void
+  endMatch: (info: GameOverInfo) => void
+}
+
+
+export interface GameOverInfo {
+  winner: 'blue' | 'red' | 'draw'
+  reason: 'annihilation' | 'timer' | 'objective'
+  blue_score: number
+  red_score: number
+  turn: number
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -98,6 +118,10 @@ export const useStore = create<AppState>((set, get) => ({
   resolving: false,
   pendingEvents: null,
   replaying: false,
+  matchSeconds: 300,
+  matchElapsed: 0,
+  matchStarted: false,
+  gameOver: null,
 
   setGame: (g) => set({ game: g }),
   selectUnit: (id) => set({ selectedUnitId: id }),
@@ -230,4 +254,35 @@ export const useStore = create<AppState>((set, get) => ({
 
   setPendingEvents: (events) => set({ pendingEvents: events }),
   setReplaying: (b) => set({ replaying: b }),
+
+  startMatch: () => set((s) => s.matchStarted ? {} : { matchStarted: true }),
+
+  tickMatch: (dt) => {
+    const s = get()
+    if (!s.matchStarted || s.replaying || s.resolving || s.gameOver) return
+    const next = s.matchElapsed + dt
+    if (next >= s.matchSeconds) {
+      // Timer expired -> end match by score.
+      const ti = s.turnInfo
+      const blue = ti?.blue_score ?? 0
+      const red = ti?.red_score ?? 0
+      set({
+        matchElapsed: s.matchSeconds,
+        gameOver: {
+          winner: blue === red ? 'draw' : blue > red ? 'blue' : 'red',
+          reason: 'timer',
+          blue_score: blue, red_score: red,
+          turn: ti?.turn ?? 0,
+        },
+      })
+    } else {
+      set({ matchElapsed: next })
+    }
+  },
+
+  resetMatch: () => set({
+    matchElapsed: 0, matchStarted: false, gameOver: null,
+  }),
+
+  endMatch: (info) => set({ gameOver: info }),
 }))
