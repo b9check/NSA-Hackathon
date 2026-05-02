@@ -173,17 +173,24 @@ function RosterGroup({
 
 // Tiny copy of the visibility math so HUD components don't import from MapStage.
 // Accepts blue/red view modes; returns the set of (col,row) keys reachable
-// by ANY friendly unit's sensor range.
+// by ANY friendly UNIT or BASE sensor range (so the base's own hex always
+// counts even when no mobile unit is parked nearby).
 function computeRosterVisibility(
   game: import('../types').GameState,
   side: 'blue' | 'red',
 ): Set<string> {
   const out = new Set<string>()
+  const sources: Array<{ col: number; row: number; sensor: number }> = []
   for (const u of game.units) {
-    if (u.side !== side) continue
+    if (u.side === side) sources.push({ col: u.col, row: u.row, sensor: u.sensor })
+  }
+  for (const b of game.bases ?? []) {
+    if (b.side === side) sources.push({ col: b.col, row: b.row, sensor: b.sensor })
+  }
+  for (const s of sources) {
     for (const cell of game.map.cells) {
-      const d = hexDist(u.col, u.row, cell.col, cell.row)
-      if (d <= u.sensor) out.add(`${cell.col},${cell.row}`)
+      const d = hexDist(s.col, s.row, cell.col, cell.row)
+      if (d <= s.sensor) out.add(`${cell.col},${cell.row}`)
     }
   }
   return out
@@ -203,67 +210,125 @@ function toCube(c: number, r: number) {
 function UnitDetail({ unit }: { unit: UnitInstance }) {
   const accent = unit.side === 'blue' ? 'text-blue' : 'text-red'
   return (
-    <div className="space-y-3">
-      <div>
-        <div className="flex items-baseline gap-2 flex-wrap">
-          <span className={`text-base font-semibold ${accent}`}>{unit.display}</span>
+    <div className="space-y-3 min-w-0">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`text-[13px] font-semibold ${accent} truncate`}>
+            {unit.display}
+          </span>
           {unit.stealth && (
-            <span className="text-[10px] font-mono text-amber border border-amber/60 px-1 rounded-sm">
+            <span className="shrink-0 text-[9px] font-mono text-amber border border-amber/60 px-1 rounded-sm">
               STEALTH
             </span>
           )}
         </div>
         {unit.role && (
-          <div className="text-[11px] text-mute mt-0.5 italic">{unit.role}</div>
+          <div className="text-[11px] text-mute mt-0.5 leading-snug">{unit.role}</div>
         )}
-        <div className="text-[11px] font-mono text-mute mt-0.5">
+        <div className="text-[10px] font-mono text-mute mt-0.5 truncate">
           {unit.id} · {DOMAIN_LABEL[unit.domain] ?? unit.domain.toUpperCase()} · ({unit.col},{unit.row})
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-xs font-mono">
-        <Stat label="HP"      value={`${unit.hp}/${unit.max_hp}`} />
-        <Stat label="COST"    value={`${unit.cost} pts`} />
-        <Stat label="SPEED"   value={`${unit.speed}`} suffix="hex/turn" />
-        <Stat label="SENSOR"  value={`${unit.sensor}`} suffix={unit.sensor === 0 ? 'own hex' : 'hex'} />
-        <Stat label="WEAPON"  value={unit.weapon === 0 ? '—' : `${unit.weapon}`} suffix={unit.weapon === 0 ? 'ISR only' : 'hex'} />
-        <Stat label="GLYPH"   value={unit.glyph} />
+      <div className="grid grid-cols-3 gap-y-2 gap-x-3 text-[11px] font-mono">
+        <Stat label="HP"     value={`${unit.hp}/${unit.max_hp}`} />
+        <Stat label="SPEED"  value={`${unit.speed}`}  suffix="hx/t" />
+        <Stat label="COST"   value={`${unit.cost}`}   suffix="pts" />
+        <Stat label="SENSOR" value={`${unit.sensor}`} suffix={unit.sensor === 0 ? 'own hex' : 'hex'} />
+        <Stat label="WEAPON" value={unit.weapon === 0 ? '—' : `${unit.weapon}`}
+              suffix={unit.weapon === 0 ? 'ISR' : 'hex'} />
+        <Stat label="GLYPH"  value={unit.glyph} />
       </div>
-      {unit.sensors.length > 0 && <SubsystemList title="SENSORS" items={unit.sensors.map(s => ({
-        key: s.key, primary: s.display, badge: s.modality.toUpperCase(),
-        meta: `range ${s.range}${s.emits ? ' · emits' : ''}`,
-      }))} />}
-      {unit.weapons.length > 0 && <SubsystemList title="WEAPONS" items={unit.weapons.map(w => ({
-        key: w.key, primary: w.display, badge: w.kind.toUpperCase(),
-        meta: `range ${w.range}${w.ammo > 0 ? ` · ${w.ammo} rd` : ''} · pkill ${formatPkill(w.pkill)}`,
-      }))} />}
+      {unit.sensors.length > 0 && (
+        <SubsystemList
+          title="SENSORS"
+          items={unit.sensors.map((s) => ({
+            key: s.key,
+            primary: s.display,
+            badge: s.modality,
+            badgeClass: SENSOR_BADGE[s.modality] ?? 'text-mute',
+            meta: `range ${s.range}${s.emits ? ' · emits' : ''}${s.los_required ? ' · LOS' : ''}`,
+          }))}
+        />
+      )}
+      {unit.weapons.length > 0 && (
+        <SubsystemList
+          title="WEAPONS"
+          items={unit.weapons.map((w) => ({
+            key: w.key,
+            primary: w.display,
+            badge: humanKind(w.kind),
+            badgeClass: 'text-amber',
+            meta: weaponMeta(w),
+          }))}
+        />
+      )}
     </div>
   )
 }
 
-function formatPkill(pk: Record<string, number>) {
-  const parts = Object.entries(pk).map(([d, p]) => `${d.charAt(0)}=${p.toFixed(2)}`)
-  return parts.length ? parts.join(' ') : '—'
+const SENSOR_BADGE: Record<string, string> = {
+  radar:  'text-blue',
+  eo:     'text-green',
+  ir:     'text-amber',
+  sigint: 'text-red',
+  sonar:  'text-mute',
+}
+
+function humanKind(k: WeaponRef['kind']): string {
+  return ({
+    aam: 'AAM',
+    asm_air: 'ASM',
+    asm_ship: 'ASM',
+    sam: 'SAM',
+    gun_naval: 'GUN',
+    gun_armor: 'GUN',
+    manpads: 'MANPADS',
+    loitering: 'LOITER',
+  } as Record<string, string>)[k] ?? k.toUpperCase()
+}
+
+function weaponMeta(w: WeaponRef): string {
+  const parts: string[] = [`r${w.range}`]
+  if (w.ammo > 0) parts.push(`${w.ammo}rd`)
+  const pk = Object.entries(w.pkill)
+    .map(([d, p]) => `${d[0].toUpperCase()}=${p.toFixed(2)}`)
+    .join(' ')
+  if (pk) parts.push(pk)
+  return parts.join(' · ')
 }
 
 function SubsystemList({
-  title, items,
+  title,
+  items,
 }: {
   title: string
-  items: Array<{ key: string; primary: string; badge: string; meta: string }>
+  items: Array<{
+    key: string
+    primary: string
+    badge: string
+    badgeClass: string
+    meta: string
+  }>
 }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="text-[10px] tracking-widest text-mute mb-1.5 font-mono">{title}</div>
       <div className="space-y-1">
         {items.map((it) => (
-          <div key={it.key} className="border border-line rounded-sm px-2 py-1">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-fg truncate">{it.primary}</span>
-              <span className="text-[9px] font-mono text-mute uppercase tracking-wider">
+          <div key={it.key} className="border border-line rounded-sm px-2 py-1 min-w-0">
+            <div className="flex items-baseline justify-between gap-2 min-w-0">
+              <span className="text-[11px] text-fg truncate min-w-0 flex-1">
+                {it.primary}
+              </span>
+              <span
+                className={`shrink-0 text-[9px] font-mono uppercase tracking-wider ${it.badgeClass}`}
+              >
                 {it.badge}
               </span>
             </div>
-            <div className="text-[10px] font-mono text-mute mt-0.5">{it.meta}</div>
+            <div className="text-[10px] font-mono text-mute mt-0.5 break-all">
+              {it.meta}
+            </div>
           </div>
         ))}
       </div>
@@ -305,11 +370,11 @@ function BaseGroup({
 
 function Stat({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
   return (
-    <div>
-      <div className="text-[10px] tracking-widest text-mute">{label}</div>
-      <div className="text-fg">
+    <div className="min-w-0">
+      <div className="text-[9px] tracking-widest text-mute">{label}</div>
+      <div className="text-fg truncate text-[11px]">
         {value}
-        {suffix && <span className="text-mute ml-1 text-[10px]">{suffix}</span>}
+        {suffix && <span className="text-mute ml-1 text-[9px]">{suffix}</span>}
       </div>
     </div>
   )

@@ -42,10 +42,18 @@ function computeVisibleHexes(state: GameState, mode: ViewMode): Set<string> {
   // Empty set = "no fog filter"; caller treats omniscient specially.
   const out = new Set<string>()
   if (mode === 'omniscient') return out
+  // Friendly units AND bases contribute to the COP. Bases always cover at
+  // least their own hex (sensor=0), and many carry organic radars.
+  const sources: Array<{ col: number; row: number; sensor: number }> = []
   for (const u of state.units) {
-    if (u.side !== mode) continue
+    if (u.side === mode) sources.push({ col: u.col, row: u.row, sensor: u.sensor })
+  }
+  for (const b of state.bases ?? []) {
+    if (b.side === mode) sources.push({ col: b.col, row: b.row, sensor: b.sensor })
+  }
+  for (const src of sources) {
     for (const cell of state.map.cells) {
-      if (hexDistance(u.col, u.row, cell.col, cell.row) <= u.sensor) {
+      if (hexDistance(src.col, src.row, cell.col, cell.row) <= src.sensor) {
         out.add(`${cell.col},${cell.row}`)
       }
     }
