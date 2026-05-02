@@ -24,6 +24,7 @@ sensor_pipeline/backend/*.log
 # IDE / editor
 .vscode/
 .idea/
+.claude/
 *.swp
 .DS_Store
 Thumbs.db
