@@ -1,0 +1,10 @@
+INFO:     127.0.0.1:64463 - "GET /api/scenario HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51494 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65024 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65024 - "GET /static/js/main.ca190525.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65024 - "GET /favicon.ico HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65300 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62600 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58062 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58062 - "GET /static/js/main.81f97550.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58062 - "GET /favicon.ico HTTP/1.1" 200 OK
