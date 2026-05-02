@@ -5,15 +5,23 @@
 // each redraw: matching ids are updated in place; new ids spawn fresh nodes;
 // stale ids are flagged for removal so the death-animation system can play
 // them out before destroy().
-import { Container, Graphics, Text, TextStyle } from 'pixi.js'
+import { Container, Graphics, Sprite, Text, TextStyle } from 'pixi.js'
 import type { BaseInstance, Side, UnitInstance } from '../types'
 import { COLORS, SIDE_COLOR, SIDE_DIM } from '../theme'
 import { HEX_SIZE, hexToPixel } from '../hex'
+import { getIcon } from './icons'
+
+
+// Sprite size for unit icons (FlightRadar-ish small silhouettes).
+const UNIT_ICON_PX = 30
+const BASE_ICON_PX = 28
+
 
 export interface UnitNode {
   container: Container
-  shape: Graphics
-  glyph: Text
+  // Either a Sprite (icon) or fallback Graphics (procedural shape).
+  shape: Sprite | Graphics
+  glyph: Text | null
   hpBar: Graphics
   // Last rendered values, so we don't redraw if nothing changed.
   lastHp: number
@@ -22,8 +30,8 @@ export interface UnitNode {
 
 export interface BaseNode {
   container: Container
-  shape: Graphics
-  glyph: Text
+  shape: Sprite | Graphics
+  glyph: Text | null
   hpBar: Graphics
   lastHp: number
   lastMaxHp: number
@@ -93,22 +101,45 @@ export function createUnitNode(unit: UnitInstance): UnitNode {
   const container = new Container()
   container.eventMode = 'none' // hit-test stays on the stage (brute force)
   container.label = `unit:${unit.id}`
-  const shape = new Graphics()
-  drawUnitShape(shape, unit)
-  container.addChild(shape)
-  const glyph = new Text({
-    text: unit.glyph,
-    style: new TextStyle({
-      fontFamily: 'IBM Plex Mono',
-      fontSize: 13,
-      fontWeight: '600',
-      fill: SIDE_COLOR[unit.side],
-      align: 'center',
-    }),
-  })
-  glyph.anchor.set(0.5)
-  glyph.y = 0.5
-  container.addChild(glyph)
+  // Try to use the white silhouette icon and tint it; fall back to the
+  // procedural Graphics frame if the icon failed to load.
+  const tex = getIcon(unit.type)
+  let shape: Sprite | Graphics
+  let glyph: Text | null = null
+  if (tex) {
+    const sprite = new Sprite(tex)
+    sprite.anchor.set(0.5)
+    sprite.width = UNIT_ICON_PX
+    sprite.height = UNIT_ICON_PX
+    sprite.tint = SIDE_COLOR[unit.side]
+    container.addChild(sprite)
+    shape = sprite
+  } else {
+    const g = new Graphics()
+    drawUnitShape(g, unit)
+    container.addChild(g)
+    glyph = new Text({
+      text: unit.glyph,
+      style: new TextStyle({
+        fontFamily: 'IBM Plex Mono',
+        fontSize: 13,
+        fontWeight: '600',
+        fill: SIDE_COLOR[unit.side],
+        align: 'center',
+      }),
+    })
+    glyph.anchor.set(0.5)
+    glyph.y = 0.5
+    container.addChild(glyph)
+    shape = g
+  }
+  if (unit.stealth) {
+    // Small white dot to mark stealth platforms regardless of icon vs graphics.
+    const dot = new Graphics()
+      .circle(UNIT_ICON_PX * 0.4, -UNIT_ICON_PX * 0.4, 2.4)
+      .fill(COLORS.fg)
+    container.addChild(dot)
+  }
   const hpBar = new Graphics()
   drawHpBar(hpBar, unit.hp, unit.max_hp, unit.side)
   container.addChild(hpBar)
@@ -131,7 +162,7 @@ export function updateUnitNode(node: UnitNode, unit: UnitInstance) {
     node.lastHp = unit.hp
     node.lastMaxHp = unit.max_hp
   }
-  if (node.glyph.text !== unit.glyph) {
+  if (node.glyph && node.glyph.text !== unit.glyph) {
     node.glyph.text = unit.glyph
   }
 }
@@ -140,21 +171,36 @@ export function createBaseNode(base: BaseInstance): BaseNode {
   const container = new Container()
   container.eventMode = 'none'
   container.label = `base:${base.id}`
-  const shape = new Graphics()
-  drawBaseShape(shape, base)
-  container.addChild(shape)
-  const glyph = new Text({
-    text: 'B',
-    style: new TextStyle({
-      fontFamily: 'IBM Plex Mono',
-      fontSize: 11,
-      fontWeight: '700',
-      fill: SIDE_DIM[base.side],
-    }),
-  })
-  glyph.anchor.set(0.5)
-  glyph.y = 1
-  container.addChild(glyph)
+  const tex = getIcon(base.type)
+  let shape: Sprite | Graphics
+  let glyph: Text | null = null
+  if (tex) {
+    const sprite = new Sprite(tex)
+    sprite.anchor.set(0.5)
+    sprite.width = BASE_ICON_PX
+    sprite.height = BASE_ICON_PX
+    sprite.tint = SIDE_DIM[base.side]
+    sprite.alpha = 0.92
+    container.addChild(sprite)
+    shape = sprite
+  } else {
+    const g = new Graphics()
+    drawBaseShape(g, base)
+    container.addChild(g)
+    glyph = new Text({
+      text: 'B',
+      style: new TextStyle({
+        fontFamily: 'IBM Plex Mono',
+        fontSize: 11,
+        fontWeight: '700',
+        fill: SIDE_DIM[base.side],
+      }),
+    })
+    glyph.anchor.set(0.5)
+    glyph.y = 1
+    container.addChild(glyph)
+    shape = g
+  }
   const hpBar = new Graphics()
   drawHpBar(hpBar, base.hp, base.max_hp, base.side)
   container.addChild(hpBar)

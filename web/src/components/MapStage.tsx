@@ -26,6 +26,8 @@ import {
   type BaseNode,
   type UnitNode,
 } from '../render/units'
+import { loadIcons } from '../render/icons'
+import { bindApp } from '../anim/tween'
 
 const PAD_X = 24
 const PAD_Y = 24
@@ -90,6 +92,12 @@ async function buildPixi(
   })
   parent.appendChild(app.canvas)
   app.canvas.style.display = 'block'
+  // Bind the global tween module to this Pixi app so animation primitives
+  // can drive off the same ticker (and pause when the app does).
+  bindApp(app)
+  // Preload the unit + base icon textures before any redraw so the very
+  // first reconcile populates Sprites instead of fallback Graphics.
+  await loadIcons()
 
   // ---- Background: pre-rendered satellite-style terrain ----
   // Cache-bust with a query param so a region swap force-reloads the image.
