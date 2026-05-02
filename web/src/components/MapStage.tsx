@@ -212,6 +212,16 @@ async function buildPixi(
       drawWeaponRing(overlay, selected, cellCenters)
     }
 
+    // ---- Bases (drawn under mobile units) ----
+    for (const b of s.bases ?? []) {
+      const c = cellCenters.get(`${b.col},${b.row}`)
+      if (!c) continue
+      if (sideView && b.side !== viewMode) {
+        if (!visibleHexes.has(`${b.col},${b.row}`)) continue
+      }
+      drawBase(unitGfx, unitTexts, unitLayer, b, c.x, c.y)
+    }
+
     // ---- Units ----
     for (const u of s.units) {
       const c = cellCenters.get(`${u.col},${u.row}`)
@@ -419,6 +429,45 @@ function hpFromGlyph(u: UnitInstance) {
 function drawSelectionRing(g: Graphics, cx: number, cy: number) {
   g.poly(hexCorners(cx, cy, HEX_SIZE * 1.0))
     .stroke({ color: COLORS.amber, width: 2, alpha: 0.95 })
+}
+
+function drawBase(
+  g: Graphics,
+  texts: Text[],
+  layer: Container,
+  b: import('../types').BaseInstance,
+  cx: number,
+  cy: number,
+) {
+  // Bases render as a wider, flatter pentagonal "fortified" shape so they
+  // read as installations rather than mobile units. Side colour is desaturated
+  // (use the dim variant) so live units pop visually.
+  const color = b.side === 'blue' ? 0x2C6FB3 : 0xB33745
+  const r = HEX_SIZE * 0.62
+  // Pentagon-ish footprint: rectangle base + chevron top.
+  const pts = [
+    cx - r,        cy + r * 0.55,
+    cx + r,        cy + r * 0.55,
+    cx + r,        cy - r * 0.15,
+    cx,            cy - r * 0.65,
+    cx - r,        cy - r * 0.15,
+  ]
+  g.poly(pts)
+    .fill({ color: COLORS.bg, alpha: 0.85 })
+    .stroke({ color, width: 2 })
+  // tiny embedded "B" label
+  const style = new TextStyle({
+    fontFamily: 'IBM Plex Mono',
+    fontSize: 11,
+    fontWeight: '700',
+    fill: color,
+  })
+  const t = new Text({ text: 'B', style })
+  t.anchor.set(0.5)
+  t.x = cx
+  t.y = cy + 1
+  layer.addChild(t)
+  texts.push(t)
 }
 
 // ---------------- React wrapper ----------------

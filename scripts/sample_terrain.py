@@ -177,14 +177,14 @@ def place_units(grid, cols: int, rows: int, seed: int) -> list[dict]:
     units: list[dict] = []
 
     # ============== Blue (south) ==============
-    # Aegis DDG: deep blue water on Blue's side — cruises in safe waters.
-    units.append({"id": "blue-aegis-1", "type": "aegis", "pos": pick(
+    # Aegis cruiser: deep blue water on Blue's side — cruises in safe waters.
+    units.append({"id": "blue-cg47-1", "type": "cg47", "pos": pick(
         AND(south_half, is_deep),
         AND(south_half, is_water),
         is_water,
     )})
-    # F-35 stealth: in own backfield (3-row band along south edge).
-    units.append({"id": "blue-f35-1", "type": "f35", "pos": pick(
+    # F-35A stealth: in own backfield (3-row band along south edge).
+    units.append({"id": "blue-f35-1", "type": "f35a", "pos": pick(
         south_band,
         south_half,
     )})
@@ -269,6 +269,77 @@ def place_units(grid, cols: int, rows: int, seed: int) -> list[dict]:
     return [u for u in units if u["pos"] is not None]
 
 
+def place_bases(grid, cols: int, rows: int, seed: int,
+                placed_units: list[dict]) -> list[dict]:
+    """Auto-place 3 bases per side (airbase, naval base, FOB / launch site).
+
+    Bases are fixed installations that spawn / repair platforms. They sit on
+    settled land hexes well inside their own side's territory and avoid
+    overlapping unit positions. Naval base hugs the coast.
+    """
+    rng = random.Random(seed ^ 0x5eed_ba5e)  # deterministic but distinct stream
+    used: set[tuple[int, int]] = {(u["pos"][0], u["pos"][1]) for u in placed_units}
+
+    south_band = lambda c, r: r >= rows - max(3, rows // 4)
+    north_band = lambda c, r: r < max(3, rows // 4)
+    south_half = lambda c, r: r >= rows / 2
+    north_half = lambda c, r: r < rows / 2
+
+    is_water = lambda c, r: grid[r][c] == "water"
+    is_land = lambda c, r: grid[r][c] != "water"
+    is_settled = lambda c, r: grid[r][c] in ("urban", "open")
+    is_coast = lambda c, r: is_coastal(grid, c, r, cols, rows)
+
+    def AND(*ps):
+        return lambda c, r: all(p(c, r) for p in ps)
+
+    def pick(*preds):
+        for p in preds:
+            cands = [(c, r) for r in range(rows) for c in range(cols)
+                     if (c, r) not in used and p(c, r)]
+            if cands:
+                pos = rng.choice(cands)
+                used.add(pos)
+                return [pos[0], pos[1]]
+        return None
+
+    bases: list[dict] = []
+
+    # ---- Blue (south) ----
+    bases.append({"id": "blue-airbase-1", "type": "blue_airbase", "pos": pick(
+        AND(south_band, is_settled),
+        AND(south_half, is_settled),
+        AND(south_half, is_land),
+    )})
+    bases.append({"id": "blue-navalbase-1", "type": "blue_navalbase", "pos": pick(
+        AND(south_half, is_coast, is_settled),
+        AND(south_half, is_coast, is_land),
+        AND(south_half, is_land),
+    )})
+    bases.append({"id": "blue-fob-1", "type": "blue_fob", "pos": pick(
+        AND(south_half, is_settled),
+        AND(south_half, is_land),
+    )})
+
+    # ---- Red (north) ----
+    bases.append({"id": "red-airbase-1", "type": "red_airbase", "pos": pick(
+        AND(north_band, is_settled),
+        AND(north_half, is_settled),
+        AND(north_half, is_land),
+    )})
+    bases.append({"id": "red-navalbase-1", "type": "red_navalbase", "pos": pick(
+        AND(north_half, is_coast, is_settled),
+        AND(north_half, is_coast, is_land),
+        AND(north_half, is_land),
+    )})
+    bases.append({"id": "red-launchsite-1", "type": "red_launchsite", "pos": pick(
+        AND(north_band, is_land),
+        AND(north_half, is_land),
+    )})
+
+    return [b for b in bases if b["pos"] is not None]
+
+
 def pick_objectives(grid, cols: int, rows: int) -> list[list[int]]:
     """Pick objective hexes — small middle-band islands (settled hexes near
     the strait center), preferring hexes with land neighbors but mostly
@@ -294,18 +365,25 @@ def pick_objectives(grid, cols: int, rows: int) -> list[list[int]]:
     return picked
 
 
+def _entity_block(entries: list[dict]) -> str:
+    lines: list[str] = []
+    for e in entries:
+        c, r = e["pos"][0], e["pos"][1]
+        lines.append(
+            f'  - {{ id: {e["id"]:<20}, type: {e["type"]:<16}, '
+            f'pos: [{c:>2}, {r:>2}] }}'
+        )
+    return "\n".join(lines)
+
+
 def write_yaml(yaml_path: Path, terrain: list[list[str]],
                objectives: list[list[int]], units: list[dict],
-               cols: int, rows: int, seed: int, name: str) -> None:
+               bases: list[dict], cols: int, rows: int, seed: int,
+               name: str) -> None:
     terrain_block = "\n".join("    " + "".join(row) for row in
                               [[CHAR[t] for t in line] for line in terrain])
-    units_block = "\n".join(
-        f'  - {{ id: {u["id"]:<16} type: {u["type"]:<10} pos: [{u["pos"][0]:>2}, {u["pos"][1]:>2}] }}'.replace(
-            f'id: {u["id"]:<16}', f'id: {u["id"]:<16},').replace(
-            f'type: {u["type"]:<10}', f'type: {u["type"]:<10},')
-        for u in units
-    )
-
+    units_block = _entity_block(units)
+    bases_block = _entity_block(bases)
     obj_block = "\n".join(f"    - [{o[0]}, {o[1]}]" for o in objectives)
 
     text = f"""name: "{name}"
@@ -327,9 +405,13 @@ victory:
   capture_hold_turns: 2
   combat_power_threshold: 0.6
 
-# Auto-placed by scripts/sample_terrain.py (deterministic per seed).
+# Mobile platforms (auto-placed by scripts/sample_terrain.py per seed).
 units:
 {units_block}
+
+# Fixed installations (airbase / naval base / FOB / launch site).
+bases:
+{bases_block}
 """
     yaml_path.write_text(text)
 
@@ -371,9 +453,10 @@ def main() -> int:
     print(f"objectives: {objectives}")
 
     units = place_units(grid, cols, rows, seed)
-    print(f"placed {len(units)} units")
+    bases = place_bases(grid, cols, rows, seed, units)
+    print(f"placed {len(units)} units, {len(bases)} bases")
 
-    write_yaml(yaml_path, grid, objectives, units, cols, rows, seed, name)
+    write_yaml(yaml_path, grid, objectives, units, bases, cols, rows, seed, name)
     print(f"wrote {yaml_path} (name: {name!r})")
     return 0
 

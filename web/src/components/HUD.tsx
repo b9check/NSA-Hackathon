@@ -1,5 +1,5 @@
 import { useStore } from '../store'
-import type { UnitInstance } from '../types'
+import type { BaseInstance, SensorRef, UnitInstance, WeaponRef } from '../types'
 import { RegionPicker } from './RegionPicker'
 import { ViewModeToggle } from './ViewModeToggle'
 
@@ -57,14 +57,23 @@ export function RightRail() {
   const selected = game.units.find((u) => u.id === selectedUnitId) ?? null
   const blue = game.units.filter((u) => u.side === 'blue')
   const red = game.units.filter((u) => u.side === 'red')
+  const blueBases = (game.bases ?? []).filter((b) => b.side === 'blue')
+  const redBases = (game.bases ?? []).filter((b) => b.side === 'red')
 
   return (
-    <div className="w-[340px] bg-panel border-l border-line flex flex-col h-full text-sm">
+    <div className="w-[360px] bg-panel border-l border-line flex flex-col h-full text-sm">
       <Section title="ORDER OF BATTLE">
         <RosterGroup label="BLUE" side="blue" units={blue} selectedId={selectedUnitId} onSelect={selectUnit} />
         <div className="h-2" />
         <RosterGroup label="RED" side="red" units={red} selectedId={selectedUnitId} onSelect={selectUnit} />
       </Section>
+      {(blueBases.length > 0 || redBases.length > 0) && (
+        <Section title="BASES &amp; INSTALLATIONS">
+          {blueBases.length > 0 && <BaseGroup label="BLUE" side="blue" bases={blueBases} />}
+          {blueBases.length > 0 && redBases.length > 0 && <div className="h-2" />}
+          {redBases.length > 0 && <BaseGroup label="RED" side="red" bases={redBases} />}
+        </Section>
+      )}
       <Section title="SELECTED UNIT" grow>
         {selected ? <UnitDetail unit={selected} /> : <Empty />}
       </Section>
@@ -196,7 +205,7 @@ function UnitDetail({ unit }: { unit: UnitInstance }) {
   return (
     <div className="space-y-3">
       <div>
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-baseline gap-2 flex-wrap">
           <span className={`text-base font-semibold ${accent}`}>{unit.display}</span>
           {unit.stealth && (
             <span className="text-[10px] font-mono text-amber border border-amber/60 px-1 rounded-sm">
@@ -204,20 +213,91 @@ function UnitDetail({ unit }: { unit: UnitInstance }) {
             </span>
           )}
         </div>
+        {unit.role && (
+          <div className="text-[11px] text-mute mt-0.5 italic">{unit.role}</div>
+        )}
         <div className="text-[11px] font-mono text-mute mt-0.5">
           {unit.id} · {DOMAIN_LABEL[unit.domain] ?? unit.domain.toUpperCase()} · ({unit.col},{unit.row})
         </div>
       </div>
       <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-xs font-mono">
-        <Stat label="HP"      value={`${unit.hp}`} />
+        <Stat label="HP"      value={`${unit.hp}/${unit.max_hp}`} />
         <Stat label="COST"    value={`${unit.cost} pts`} />
         <Stat label="SPEED"   value={`${unit.speed}`} suffix="hex/turn" />
-        <Stat label="SENSOR"  value={`${unit.sensor}`} suffix="hex" />
+        <Stat label="SENSOR"  value={`${unit.sensor}`} suffix={unit.sensor === 0 ? 'own hex' : 'hex'} />
         <Stat label="WEAPON"  value={unit.weapon === 0 ? '—' : `${unit.weapon}`} suffix={unit.weapon === 0 ? 'ISR only' : 'hex'} />
         <Stat label="GLYPH"   value={unit.glyph} />
       </div>
-      <div className="text-[11px] text-mute leading-relaxed">
-        Click any blue unit to inspect. The amber ring shows weapon range, the green ring shows sensor range, and the tinted hexes show reachable destinations this turn.
+      {unit.sensors.length > 0 && <SubsystemList title="SENSORS" items={unit.sensors.map(s => ({
+        key: s.key, primary: s.display, badge: s.modality.toUpperCase(),
+        meta: `range ${s.range}${s.emits ? ' · emits' : ''}`,
+      }))} />}
+      {unit.weapons.length > 0 && <SubsystemList title="WEAPONS" items={unit.weapons.map(w => ({
+        key: w.key, primary: w.display, badge: w.kind.toUpperCase(),
+        meta: `range ${w.range}${w.ammo > 0 ? ` · ${w.ammo} rd` : ''} · pkill ${formatPkill(w.pkill)}`,
+      }))} />}
+    </div>
+  )
+}
+
+function formatPkill(pk: Record<string, number>) {
+  const parts = Object.entries(pk).map(([d, p]) => `${d.charAt(0)}=${p.toFixed(2)}`)
+  return parts.length ? parts.join(' ') : '—'
+}
+
+function SubsystemList({
+  title, items,
+}: {
+  title: string
+  items: Array<{ key: string; primary: string; badge: string; meta: string }>
+}) {
+  return (
+    <div>
+      <div className="text-[10px] tracking-widest text-mute mb-1.5 font-mono">{title}</div>
+      <div className="space-y-1">
+        {items.map((it) => (
+          <div key={it.key} className="border border-line rounded-sm px-2 py-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-fg truncate">{it.primary}</span>
+              <span className="text-[9px] font-mono text-mute uppercase tracking-wider">
+                {it.badge}
+              </span>
+            </div>
+            <div className="text-[10px] font-mono text-mute mt-0.5">{it.meta}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function BaseGroup({
+  label, side, bases,
+}: {
+  label: string
+  side: 'blue' | 'red'
+  bases: BaseInstance[]
+}) {
+  const color = side === 'blue' ? 'text-blue' : 'text-red'
+  const dot = side === 'blue' ? 'bg-blue' : 'bg-red'
+  return (
+    <div>
+      <div className={`flex items-center gap-2 text-[11px] font-mono ${color} mb-1.5`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+        {label}
+      </div>
+      <div className="grid grid-cols-1 gap-0.5">
+        {bases.map((b) => (
+          <div
+            key={b.id}
+            className="px-2 py-1 rounded-sm font-mono text-xs text-mute flex items-center justify-between"
+          >
+            <span className="truncate">{b.display}</span>
+            <span className="text-[10px] opacity-70">
+              ({b.col},{b.row}) · hp {b.hp}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   )

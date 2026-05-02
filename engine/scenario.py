@@ -5,16 +5,97 @@ from pathlib import Path
 
 import yaml
 
-from engine import units as catalog
+from engine.catalog import BASES, PLATFORMS, SENSORS, WEAPONS
+from engine.catalog.bases import Base
+from engine.catalog.platforms import Platform
 from engine.state import (
+    BaseInstance,
     GameState,
     HexCell,
     MapInfo,
     Objective,
+    SensorRef,
     UnitInstance,
     VictoryConfig,
+    WeaponRef,
 )
 from engine.terrain import TERRAIN_FROM_CHAR
+
+
+def _sensor_refs(keys: tuple[str, ...]) -> list[SensorRef]:
+    out: list[SensorRef] = []
+    for k in keys:
+        s = SENSORS[k]
+        out.append(SensorRef(
+            key=s.key, display=s.display, modality=s.modality, range=s.range,
+            los_required=s.los_required, detects_stealth=s.detects_stealth,
+            target_domains=list(s.target_domains), emits=s.emits, notes=s.notes,
+        ))
+    return out
+
+
+def _weapon_refs(keys: tuple[str, ...]) -> list[WeaponRef]:
+    out: list[WeaponRef] = []
+    for k in keys:
+        w = WEAPONS[k]
+        out.append(WeaponRef(
+            key=w.key, display=w.display, kind=w.kind, range=w.range,
+            pkill=dict(w.pkill), ammo=w.ammo, notes=w.notes,
+        ))
+    return out
+
+
+def _platform_to_unit(u: dict, p: Platform) -> UnitInstance:
+    col, row = u["pos"]
+    sensors = _sensor_refs(p.sensors)
+    weapons = _weapon_refs(p.weapons)
+    return UnitInstance(
+        id=u["id"],
+        type=p.key,
+        side=p.side,
+        col=int(col),
+        row=int(row),
+        hp=int(u.get("hp", p.hp)),
+        max_hp=p.hp,
+        display=p.display,
+        role=p.role,
+        domain=p.domain,
+        glyph=p.glyph,
+        speed=p.speed,
+        sensor=p.summary_sensor_range(),
+        weapon=p.summary_weapon_range(),
+        cost=p.cost,
+        stealth=p.stealth,
+        sensors=sensors,
+        weapons=weapons,
+    )
+
+
+def _base_to_instance(b: dict, bt: Base) -> BaseInstance:
+    col, row = b["pos"]
+    sensors = _sensor_refs(bt.sensors)
+    weapons = _weapon_refs(bt.weapons)
+    sensor_max = max((s.range for s in sensors), default=0)
+    weapon_max = max((w.range for w in weapons), default=0)
+    return BaseInstance(
+        id=b["id"],
+        type=bt.key,
+        side=bt.side,
+        col=int(col),
+        row=int(row),
+        hp=int(b.get("hp", bt.hp)),
+        max_hp=bt.hp,
+        display=bt.display,
+        role=bt.role,
+        domain=bt.domain,
+        glyph=bt.glyph,
+        capacity=bt.capacity,
+        spawns=list(bt.spawns),
+        sensor=sensor_max,
+        weapon=weapon_max,
+        sensors=sensors,
+        weapons=weapons,
+    )
 
 
 def load_scenario(path: str | Path) -> GameState:
@@ -55,27 +136,18 @@ def load_scenario(path: str | Path) -> GameState:
     )
 
     unit_instances: list[UnitInstance] = []
-    for u in raw["units"]:
-        utype = catalog.get(u["type"])
-        col, row = u["pos"]
-        unit_instances.append(
-            UnitInstance(
-                id=u["id"],
-                type=utype.key,
-                side=utype.side,  # type: ignore[arg-type]
-                col=int(col),
-                row=int(row),
-                hp=int(u.get("hp", utype.hp)),
-                display=utype.display,
-                domain=utype.domain,
-                glyph=utype.glyph,
-                speed=utype.speed,
-                sensor=utype.sensor,
-                weapon=utype.weapon,
-                cost=utype.cost,
-                stealth=utype.stealth,
-            )
-        )
+    for u in raw.get("units", []):
+        ptype = PLATFORMS.get(u["type"])
+        if ptype is None:
+            raise KeyError(f"unknown platform {u['type']!r}")
+        unit_instances.append(_platform_to_unit(u, ptype))
+
+    base_instances: list[BaseInstance] = []
+    for b in raw.get("bases", []):
+        btype = BASES.get(b["type"])
+        if btype is None:
+            raise KeyError(f"unknown base {b['type']!r}")
+        base_instances.append(_base_to_instance(b, btype))
 
     victory = VictoryConfig(**raw.get("victory", {}))
 
@@ -86,5 +158,6 @@ def load_scenario(path: str | Path) -> GameState:
         turn_limit=int(raw.get("turn_limit", 30)),
         map=map_info,
         units=unit_instances,
+        bases=base_instances,
         victory=victory,
     )

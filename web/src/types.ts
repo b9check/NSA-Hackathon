@@ -22,6 +22,36 @@ export interface MapInfo {
   objective_hexes: Objective[]
 }
 
+export interface SensorRef {
+  key: string
+  display: string
+  modality: 'radar' | 'eo' | 'ir' | 'sigint' | 'sonar'
+  range: number
+  los_required: boolean
+  detects_stealth: boolean
+  target_domains: string[]
+  emits: boolean
+  notes: string
+}
+
+export interface WeaponRef {
+  key: string
+  display: string
+  kind:
+    | 'aam'
+    | 'asm_air'
+    | 'asm_ship'
+    | 'sam'
+    | 'gun_naval'
+    | 'gun_armor'
+    | 'manpads'
+    | 'loitering'
+  range: number
+  pkill: Record<string, number>
+  ammo: number
+  notes: string
+}
+
 export interface UnitInstance {
   id: string
   type: string
@@ -29,7 +59,9 @@ export interface UnitInstance {
   col: number
   row: number
   hp: number
+  max_hp: number
   display: string
+  role: string
   domain: Domain
   glyph: string
   speed: number
@@ -37,6 +69,28 @@ export interface UnitInstance {
   weapon: number
   cost: number
   stealth: boolean
+  sensors: SensorRef[]
+  weapons: WeaponRef[]
+}
+
+export interface BaseInstance {
+  id: string
+  type: string
+  side: Side
+  col: number
+  row: number
+  hp: number
+  max_hp: number
+  display: string
+  role: string
+  domain: 'land' | 'sea'
+  glyph: string
+  capacity: number
+  spawns: string[]
+  sensor: number
+  weapon: number
+  sensors: SensorRef[]
+  weapons: WeaponRef[]
 }
 
 export interface VictoryConfig {
@@ -51,5 +105,6 @@ export interface GameState {
   turn_limit: number
   map: MapInfo
   units: UnitInstance[]
+  bases: BaseInstance[]
   victory: VictoryConfig
 }
