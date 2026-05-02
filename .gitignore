@@ -1,0 +1,32 @@
+# Node / frontend
+node_modules/
+sensor_pipeline/frontend/build/
+sensor_pipeline/frontend/.cache/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Backend runtime artefacts
+sensor_pipeline/backend/server_stdout.log
+sensor_pipeline/backend/server_stderr.log
+sensor_pipeline/backend/*.log
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Misc
+*.bak
