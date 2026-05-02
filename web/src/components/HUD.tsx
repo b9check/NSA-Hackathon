@@ -1,5 +1,6 @@
 import { useStore } from '../store'
 import type { BaseInstance, SensorRef, UnitInstance, WeaponRef } from '../types'
+import { ActionMenu } from './ActionMenu'
 import { RegionPicker } from './RegionPicker'
 import { ViewModeToggle } from './ViewModeToggle'
 
@@ -223,7 +224,15 @@ function toCube(c: number, r: number) {
 }
 
 function UnitDetail({ unit }: { unit: UnitInstance }) {
+  const viewMode = useStore((s) => s.viewMode)
   const accent = unit.side === 'blue' ? 'text-blue' : 'text-red'
+  // Action menu only shows for the side currently in control:
+  //   - omniscient view -> Blue is the player by convention
+  //   - blue view       -> Blue
+  //   - red view        -> Red
+  const playerSide: 'blue' | 'red' =
+    viewMode === 'red' ? 'red' : 'blue'
+  const canCommand = unit.side === playerSide
   return (
     <div className="space-y-3 min-w-0">
       <div className="min-w-0">
@@ -244,6 +253,7 @@ function UnitDetail({ unit }: { unit: UnitInstance }) {
           {unit.id} · {DOMAIN_LABEL[unit.domain] ?? unit.domain.toUpperCase()} · ({unit.col},{unit.row})
         </div>
       </div>
+      {canCommand && <ActionMenu unit={unit} />}
       <div className="grid grid-cols-3 gap-y-2 gap-x-3 text-[11px] font-mono">
         <Stat label="HP"     value={`${unit.hp}/${unit.max_hp}`} />
         <Stat label="SPEED"  value={`${unit.speed}`}  suffix="hx/t" />

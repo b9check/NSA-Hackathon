@@ -107,4 +107,35 @@ export interface GameState {
   units: UnitInstance[]
   bases: BaseInstance[]
   victory: VictoryConfig
+  starting_total?: Record<string, number>
+}
+
+
+// Mirrors engine/orders.py at the wire level.
+export type OrderKind =
+  | 'MOVE'
+  | 'STRIKE'
+  | 'SCOUT'
+  | 'OVERWATCH'
+  | 'HOLD'
+  | 'CAPTURE'
+
+export type Order =
+  | { kind: 'MOVE'; unit_id: string; target_hex: [number, number]; intent?: string }
+  | { kind: 'STRIKE'; unit_id: string; target_id: string; intent?: string }
+  | { kind: 'SCOUT'; unit_id: string; target_hex: [number, number]; intent?: string }
+  | { kind: 'OVERWATCH'; unit_id: string; intent?: string }
+  | { kind: 'HOLD'; unit_id: string; intent?: string }
+  | { kind: 'CAPTURE'; unit_id: string; target_hex: [number, number]; intent?: string }
+
+
+export interface TurnInfo {
+  turn: number
+  blue_score: number
+  red_score: number
+  blue_locked: boolean
+  red_locked: boolean
+  blue_orders_count: number
+  red_orders_count: number
+  pending_units: { blue: string[]; red: string[] }
 }

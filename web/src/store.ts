@@ -1,5 +1,12 @@
 import { create } from 'zustand'
-import type { GameState, UnitInstance, ViewMode } from './types'
+import type {
+  GameState,
+  Order,
+  OrderKind,
+  TurnInfo,
+  UnitInstance,
+  ViewMode,
+} from './types'
 
 export interface RegionMeta {
   key: string
@@ -8,6 +15,14 @@ export interface RegionMeta {
   lng: number
   zoom: number
 }
+
+/** A click on MOVE/STRIKE/SCOUT/CAPTURE puts the UI into targeting mode
+ *  for that unit; the next valid map click commits the order. */
+export interface TargetingMode {
+  unitId: string
+  kind: 'MOVE' | 'STRIKE' | 'SCOUT' | 'CAPTURE'
+}
+
 
 interface AppState {
   game: GameState | null
@@ -20,6 +35,11 @@ interface AppState {
   swapping: boolean
   swapError: string | null
   viewMode: ViewMode
+  // Turn flow
+  turnInfo: TurnInfo | null
+  pendingOrders: Record<string, Order> // keyed by unit_id
+  targeting: TargetingMode | null
+  resolving: boolean
 
   setGame: (g: GameState) => void
   selectUnit: (id: string | null) => void
@@ -31,6 +51,21 @@ interface AppState {
   swapRegion: (key: string) => Promise<void>
   reroll: () => Promise<void>
   refetchState: () => Promise<void>
+
+  // ---- Turn flow -------------------------------------------------
+  /** Pull the latest turn meta (scores, locks, counts) from /api/turn. */
+  refetchTurn: () => Promise<void>
+  /** Set or replace the order for a unit. Local-only until lockSide(). */
+  setOrder: (order: Order) => void
+  /** Drop the queued order for a unit. */
+  clearOrder: (unitId: string) => void
+  /** Enter / exit targeting mode for one of MOVE/STRIKE/SCOUT/CAPTURE. */
+  startTargeting: (unitId: string, kind: TargetingMode['kind']) => void
+  cancelTargeting: () => void
+  /** Submit + lock this side's queued orders to the server. */
+  lockSide: (side: 'blue' | 'red') => Promise<void>
+  /** Run the resolver if both sides are locked; ignored otherwise. */
+  resolveTurn: () => Promise<void>
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -48,6 +83,10 @@ export const useStore = create<AppState>((set, get) => ({
   swapping: false,
   swapError: null,
   viewMode: 'omniscient',
+  turnInfo: null,
+  pendingOrders: {},
+  targeting: null,
+  resolving: false,
 
   setGame: (g) => set({ game: g }),
   selectUnit: (id) => set({ selectedUnitId: id }),
@@ -107,5 +146,71 @@ export const useStore = create<AppState>((set, get) => ({
     const v = get().assetVersion
     const game = await fetchJson<GameState>('/state.json?v=' + v)
     set({ game })
+    // Pull turn meta in parallel; don't block on failure.
+    get().refetchTurn().catch(() => {})
+  },
+
+  refetchTurn: async () => {
+    try {
+      const t = await fetchJson<TurnInfo>('/api/turn')
+      set({ turnInfo: t })
+    } catch {
+      set({ turnInfo: null })
+    }
+  },
+
+  setOrder: (order) =>
+    set((s) => ({
+      pendingOrders: { ...s.pendingOrders, [order.unit_id]: order },
+      targeting: null,
+    })),
+
+  clearOrder: (unitId) =>
+    set((s) => {
+      const next = { ...s.pendingOrders }
+      delete next[unitId]
+      return { pendingOrders: next }
+    }),
+
+  startTargeting: (unitId, kind) => set({ targeting: { unitId, kind } }),
+  cancelTargeting: () => set({ targeting: null }),
+
+  lockSide: async (side) => {
+    const { pendingOrders, game } = get()
+    if (!game) return
+    // Only orders for this side
+    const ownIds = new Set(
+      game.units.filter((u) => u.side === side).map((u) => u.id),
+    )
+    const orders = Object.values(pendingOrders).filter((o) =>
+      ownIds.has(o.unit_id),
+    )
+    try {
+      await fetchJson('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ side, orders, lock: true }),
+      })
+      await get().refetchTurn()
+    } catch (e) {
+      console.error('lockSide failed', e)
+    }
+  },
+
+  resolveTurn: async () => {
+    const { turnInfo } = get()
+    if (!turnInfo?.blue_locked || !turnInfo?.red_locked) return
+    set({ resolving: true })
+    try {
+      await fetchJson('/api/resolve', { method: 'POST' })
+      // Animation hooks will pull events from the response in a later phase;
+      // for now, snap to new state.
+      set({ pendingOrders: {}, targeting: null })
+      await get().refetchState()
+    } catch (e) {
+      console.error('resolveTurn failed', e)
+    } finally {
+      set({ resolving: false })
+    }
   },
 }))
