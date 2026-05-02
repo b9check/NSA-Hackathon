@@ -4,3 +4,5 @@ numpy==2.0.2
 rich==13.9.4
 Pillow==10.4.0
 scipy==1.13.1
+fastapi==0.115.4
+uvicorn[standard]==0.32.0

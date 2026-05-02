@@ -42,4 +42,10 @@ assets: terrain
 web:
 	cd web && npm run dev
 
-dev: assets web
+server:
+	. .venv/bin/activate && uvicorn server.main:app --reload --port 8000
+
+# Run server + frontend in parallel (Ctrl+C kills both).
+dev:
+	@(. .venv/bin/activate && uvicorn server.main:app --reload --port 8000 &) && \
+	cd web && npm run dev

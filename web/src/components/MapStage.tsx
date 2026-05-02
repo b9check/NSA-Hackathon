@@ -60,10 +60,10 @@ async function buildPixi(
   app.canvas.style.display = 'block'
 
   // ---- Background: pre-rendered satellite-style terrain ----
-  // The PNG is sized to the full canvas (including PAD_X/PAD_Y), so it lives
-  // on app.stage directly, not under the PAD-offset `root`.
+  // Cache-bust with a query param so a region swap force-reloads the image.
+  const terrainUrl = '/terrain.png?v=' + Date.now()
   try {
-    const tex = await Assets.load('/terrain.png')
+    const tex = await Assets.load(terrainUrl)
     const bg = new Sprite(tex)
     bg.x = 0
     bg.y = 0

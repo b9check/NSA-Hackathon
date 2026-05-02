@@ -1,5 +1,6 @@
 import { useStore } from '../store'
 import type { UnitInstance } from '../types'
+import { RegionPicker } from './RegionPicker'
 
 const DOMAIN_LABEL: Record<string, string> = {
   air: 'AIR',
@@ -25,6 +26,8 @@ export function TopBar() {
       <div className="ml-auto flex items-center gap-4">
         <FactionPill side="blue" />
         <FactionPill side="red" />
+        <div className="w-px h-5 bg-line" />
+        <RegionPicker />
       </div>
     </div>
   )
