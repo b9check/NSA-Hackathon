@@ -5,6 +5,7 @@ import { TopBar, RightRail } from './components/HUD'
 import { TurnBar } from './components/TurnBar'
 import { EndGameOverlay } from './components/EndGameOverlay'
 import { useMatchTimer } from './components/Timer'
+import { BattleLog } from './components/BattleLog'
 
 
 /** Watch turnInfo for annihilation conditions and end the match if so. */
@@ -124,6 +125,7 @@ export default function App() {
         {swapping && <SwapOverlay />}
         <EndGameOverlay />
       </div>
+      <BattleLog />
       <BottomBar />
     </div>
   )

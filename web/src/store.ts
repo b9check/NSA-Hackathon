@@ -53,6 +53,10 @@ interface AppState {
   matchStarted: boolean
   gameOver: GameOverInfo | null
 
+  // Battle narrative — full event history, prefixed with the turn each
+  // event was emitted on. Trimmed to last 200.
+  eventLog: AnnotatedEvent[]
+
   setGame: (g: GameState) => void
   selectUnit: (id: string | null) => void
   setHover: (h: { col: number; row: number } | null) => void
@@ -97,6 +101,9 @@ export interface GameOverInfo {
   turn: number
 }
 
+
+export type AnnotatedEvent = any & { _turn: number; _seq: number }
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init)
   if (!r.ok) throw new Error(`${url} -> HTTP ${r.status}`)
@@ -122,6 +129,7 @@ export const useStore = create<AppState>((set, get) => ({
   matchElapsed: 0,
   matchStarted: false,
   gameOver: null,
+  eventLog: [],
 
   setGame: (g) => set({ game: g }),
   selectUnit: (id) => set({ selectedUnitId: id }),
@@ -238,12 +246,21 @@ export const useStore = create<AppState>((set, get) => ({
     set({ resolving: true })
     try {
       const res: any = await fetchJson('/api/resolve', { method: 'POST' })
+      const events = res?.events ?? []
+      // Stamp every event with the turn it occurred in (server already
+      // returns turn_started_at) and a monotonic sequence number for keys.
+      const startTurn = res?.turn_started_at ?? get().turnInfo?.turn ?? 0
+      const seqBase = get().eventLog.length
+      const annotated: AnnotatedEvent[] = events.map(
+        (e: any, i: number) => ({ ...e, _turn: startTurn, _seq: seqBase + i }),
+      )
       // Stage events for the MapStage replay. It clears them when done
       // and triggers a refetchState() to snap to the resolver's truth.
       set({
         pendingOrders: {},
         targeting: null,
-        pendingEvents: res?.events ?? [],
+        pendingEvents: events,
+        eventLog: [...get().eventLog, ...annotated].slice(-200),
       })
     } catch (e) {
       console.error('resolveTurn failed', e)

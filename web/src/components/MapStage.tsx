@@ -144,6 +144,16 @@ async function buildPixi(
     cellCenters.set(`${cell.col},${cell.row}`, { x, y, cell })
   }
 
+  // ---- Last-known-position memory (per observer side) ----
+  // Each side remembers where it last *saw* enemy units / bases. Entries
+  // older than LKP_DECAY turns are purged. Only consulted in side views.
+  const LKP_DECAY = 3
+  type Lkp = { col: number; row: number; turn: number; isBase: boolean; type: string }
+  const lastSeen: Record<'blue' | 'red', Map<string, Lkp>> = {
+    blue: new Map(),
+    red: new Map(),
+  }
+
   // ---- Tactical hex grid overlay (subtle) ----
   drawHexGrid(gridLayer, state, cellCenters)
   drawObjectives(overlayLayer, state, cellCenters)
@@ -247,6 +257,41 @@ async function buildPixi(
       drawReachability(overlay, s, selected, cellCenters)
       drawSensorRing(overlay, selected, cellCenters)
       drawWeaponRing(overlay, selected, cellCenters)
+    }
+
+    // ---- LKP memory bookkeeping (only meaningful in side views) ----
+    if (sideView) {
+      const enemy = viewMode === 'blue' ? 'red' : 'blue'
+      const myMap = lastSeen[viewMode]
+      // Update from currently-visible enemies (units + bases).
+      for (const u of s.units) {
+        if (u.side !== enemy) continue
+        if (visibleHexes.has(`${u.col},${u.row}`)) {
+          myMap.set(u.id, {
+            col: u.col, row: u.row, turn: s.turn,
+            isBase: false, type: u.type,
+          })
+        }
+      }
+      for (const b of s.bases ?? []) {
+        if (b.side !== enemy) continue
+        if (visibleHexes.has(`${b.col},${b.row}`)) {
+          myMap.set(b.id, {
+            col: b.col, row: b.row, turn: s.turn,
+            isBase: true, type: b.type,
+          })
+        }
+      }
+      // Purge stale or no-longer-extant entries.
+      for (const [id, lkp] of myMap) {
+        const stillExists =
+          lkp.isBase
+            ? (s.bases ?? []).some((x) => x.id === id)
+            : s.units.some((x) => x.id === id)
+        if (!stillExists || s.turn - lkp.turn > LKP_DECAY) myMap.delete(id)
+      }
+      // Draw ghosts for entries that aren't currently visible.
+      drawLastKnownGhosts(overlay, s, viewMode, visibleHexes, myMap, cellCenters)
     }
 
     // ---- Reconcile units + bases (per-id Containers) ----
@@ -506,6 +551,60 @@ function drawWeaponRing(
 function drawSelectionRing(g: Graphics, cx: number, cy: number) {
   g.poly(hexCorners(cx, cy, HEX_SIZE * 1.0))
     .stroke({ color: COLORS.amber, width: 2, alpha: 0.95 })
+}
+
+
+function drawLastKnownGhosts(
+  g: Graphics,
+  state: GameState,
+  observer: 'blue' | 'red',
+  visibleHexes: Set<string>,
+  myMap: Map<string, { col: number; row: number; turn: number; isBase: boolean; type: string }>,
+  centers: Map<string, { x: number; y: number; cell: HexCell }>,
+) {
+  const enemyColor = observer === 'blue' ? 0xFF4D5E : 0x4DA3FF
+  for (const [_id, lkp] of myMap) {
+    if (visibleHexes.has(`${lkp.col},${lkp.row}`)) continue
+    const c = centers.get(`${lkp.col},${lkp.row}`)
+    if (!c) continue
+    const age = state.turn - lkp.turn
+    // Alpha decays with age: 0 turn ago -> 0.6, 1 -> 0.4, 2 -> 0.25, 3 -> 0.15
+    const alpha = Math.max(0.15, 0.6 - age * 0.15)
+    // Dashed-ish hex outline (we approximate with a slightly inset polygon
+    // and faded fill).
+    g.poly(hexCorners(c.x, c.y, HEX_SIZE * 0.85))
+      .fill({ color: enemyColor, alpha: alpha * 0.18 })
+      .stroke({ color: enemyColor, width: 1, alpha: alpha * 0.9 })
+    // Question-mark glyph in the center.
+    drawGhostGlyph(g, c.x, c.y, enemyColor, alpha)
+    // Age indicator (T-1, T-2, T-3) below the hex.
+    drawAgeTick(g, c.x, c.y + HEX_SIZE * 0.6, age, enemyColor, alpha)
+  }
+}
+
+
+function drawGhostGlyph(g: Graphics, cx: number, cy: number, color: number, alpha: number) {
+  // Crude '?' formed from arcs/lines (Pixi v8 Graphics doesn't render Text
+  // here; we keep this on the overlay Graphics, which is shared and cheap).
+  g.circle(cx, cy + 5, 1.6).fill({ color, alpha: alpha * 0.95 })
+  // upper hook
+  g.moveTo(cx - 4, cy - 5)
+    .quadraticCurveTo(cx, cy - 9, cx + 4, cy - 5)
+    .quadraticCurveTo(cx + 6, cy - 1, cx, cy + 1)
+    .stroke({ color, width: 1.5, alpha: alpha * 0.95 })
+}
+
+
+function drawAgeTick(
+  g: Graphics, cx: number, cy: number,
+  age: number, color: number, alpha: number,
+) {
+  // Draw 1..3 small dashes representing how old the contact is.
+  const n = Math.min(3, age + 1)
+  for (let i = 0; i < n; i++) {
+    g.rect(cx - 4 + i * 4, cy, 2.5, 1.5)
+      .fill({ color, alpha: alpha * 0.7 })
+  }
 }
 
 

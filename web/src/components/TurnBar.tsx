@@ -7,8 +7,36 @@
 //   RED_LOCKED     -> [RESOLVE TURN] pulse animation
 //
 // RESOLVING -> spinner; cleared when /api/resolve returns + state refetches.
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { TimerPill } from './Timer'
+
+
+/** Smoothly interpolate to a numeric target. */
+function useTweenedNumber(target: number, ms = 600): number {
+  const [shown, setShown] = useState(target)
+  const fromRef = useRef(target)
+  useEffect(() => {
+    const from = fromRef.current
+    const to = target
+    if (from === to) return
+    const start = performance.now()
+    let raf = 0
+    const tick = () => {
+      const t = Math.min(1, (performance.now() - start) / ms)
+      const e = 1 - Math.pow(1 - t, 3) // easeOutCubic
+      setShown(from + (to - from) * e)
+      if (t < 1) raf = requestAnimationFrame(tick)
+      else {
+        fromRef.current = to
+        setShown(to)
+      }
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [target, ms])
+  return shown
+}
 
 export function TurnBar() {
   const game = useStore((s) => s.game)
@@ -122,11 +150,12 @@ function SideControl({
   const c = side === 'blue' ? 'text-blue' : 'text-red'
   const dim = side === 'blue' ? 'border-blue/40' : 'border-red/40'
   const dot = side === 'blue' ? 'bg-blue' : 'bg-red'
+  const shownScore = useTweenedNumber(score)
   return (
     <div className="flex items-center gap-2">
       <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
       <span className={`${c} font-semibold tracking-widest`}>{side.toUpperCase()}</span>
-      <span className="text-fg tabular-nums w-10 text-right">{score.toFixed(1)}</span>
+      <span className="text-fg tabular-nums w-10 text-right">{shownScore.toFixed(1)}</span>
       <span className="text-mute text-[10px]">{ordered}/{total}</span>
       <button
         onClick={onLock}
