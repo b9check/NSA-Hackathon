@@ -24,23 +24,121 @@ import { COLORS } from '../theme'
 
 /** Tween a Container's (x, y) along a sequence of pixel waypoints.
  *  Each segment uses `msPerHex` ms; total duration scales linearly with
- *  path length. Heading rotation is set to face the next waypoint. */
+ *  path length. Heading rotation is set to face the next waypoint.
+ *
+ *  When `fxLayer` and `pathColor` are provided, a dashed track is drawn
+ *  for the full path at the start of the animation and fades out at the
+ *  end. The "already traversed" portion dims so you can read progress.
+ */
 export async function animateMovePath(
   node: Container,
   path: Array<{ x: number; y: number }>,
   msPerHex: number,
   rotateSprite: boolean = false,
+  fxLayer?: Container,
+  pathColor?: number,
 ): Promise<void> {
   if (path.length < 2 || msPerHex <= 0) return
+  // Optional dashed track + arrowhead.
+  let pathGfx: Graphics | null = null
+  let traveledGfx: Graphics | null = null
+  if (fxLayer && pathColor !== undefined) {
+    pathGfx = new Graphics()
+    drawDashedThroughPath(pathGfx, path, pathColor, 0.7)
+    drawArrowAt(pathGfx, path[path.length - 2], path[path.length - 1], pathColor)
+    fxLayer.addChildAt(pathGfx, 0)
+    // Bright "traveled so far" overlay — drawn each segment to reflect the
+    // committed portion of the route.
+    traveledGfx = new Graphics()
+    fxLayer.addChildAt(traveledGfx, 1)
+  }
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1]
     const b = path[i]
     if (rotateSprite) {
-      // Rotate the entire container; child sprites rotate with it.
       node.rotation = Math.atan2(b.y - a.y, b.x - a.x)
     }
     await tween(node, { x: b.x, y: b.y }, msPerHex, easeInOutQuad)
+    if (traveledGfx && pathColor !== undefined) {
+      // Re-stroke the committed prefix in solid bright side colour.
+      traveledGfx.clear()
+      const seg = path.slice(0, i + 1)
+      for (let k = 1; k < seg.length; k++) {
+        traveledGfx
+          .moveTo(seg[k - 1].x, seg[k - 1].y)
+          .lineTo(seg[k].x, seg[k].y)
+      }
+      traveledGfx.stroke({ color: pathColor, width: 2, alpha: 0.85 })
+    }
   }
+  // Fade + cleanup.
+  if (pathGfx) {
+    await tween(pathGfx, { alpha: 0 }, 400, easeOutCubic)
+    pathGfx.destroy()
+  }
+  if (traveledGfx) {
+    await tween(traveledGfx, { alpha: 0 }, 400, easeOutCubic)
+    traveledGfx.destroy()
+  }
+}
+
+
+function drawDashedThroughPath(
+  g: Graphics,
+  path: Array<{ x: number; y: number }>,
+  color: number,
+  alpha: number,
+) {
+  for (let i = 1; i < path.length; i++) {
+    drawDashedSegment(g, path[i - 1], path[i], color, alpha)
+  }
+}
+
+
+function drawDashedSegment(
+  g: Graphics,
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  color: number,
+  alpha: number,
+) {
+  const dx = b.x - a.x, dy = b.y - a.y
+  const len = Math.hypot(dx, dy)
+  if (len < 1) return
+  const ux = dx / len, uy = dy / len
+  const dash = 7
+  const gap = 5
+  let t = 0
+  while (t < len) {
+    const t2 = Math.min(t + dash, len)
+    g.moveTo(a.x + ux * t, a.y + uy * t)
+      .lineTo(a.x + ux * t2, a.y + uy * t2)
+    t = t2 + gap
+  }
+  g.stroke({ color, width: 1.6, alpha })
+}
+
+
+function drawArrowAt(
+  g: Graphics,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  color: number,
+) {
+  const dx = to.x - from.x, dy = to.y - from.y
+  const len = Math.hypot(dx, dy)
+  if (len < 1) return
+  const ux = dx / len, uy = dy / len
+  const tipX = to.x - ux * 4
+  const tipY = to.y - uy * 4
+  const px = -uy, py = ux
+  const baseX = tipX - ux * 9
+  const baseY = tipY - uy * 9
+  g.poly([
+    tipX, tipY,
+    baseX + px * 5, baseY + py * 5,
+    baseX - px * 5, baseY - py * 5,
+  ]).fill({ color, alpha: 0.95 })
 }
 
 

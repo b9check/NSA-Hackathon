@@ -336,7 +336,10 @@ async function buildPixi(
             const c = cellCenters.get(`${h[0]},${h[1]}`)
             return c ? { x: c.x, y: c.y } : { x: node.container.x, y: node.container.y }
           })
-          await animateMovePath(node.container, path, moveMsPerHex(u))
+          await animateMovePath(
+            node.container, path, moveMsPerHex(u), false,
+            fxLayer, SIDE_COLOR[u.side],
+          )
           break
         }
         case 'strike':
