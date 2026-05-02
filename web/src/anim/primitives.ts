@@ -161,16 +161,9 @@ export async function animateStrike(
   ]
   fxLayer.addChild(tracer)
 
-  // 0 -> STRIKE_TRACER_MS: line draws from attacker to target
-  const head = { t: 0 }
-  await tween(head, { t: 1 }, STRIKE_TRACER_MS, easeOutCubic)
-    .then(() => undefined)
-    .catch(() => undefined)
-  // We need to redraw each tick — simpler: set up the tween manually here
-  // so we can clear/restroke on every frame. Re-implement:
-
-  // (The above sequential await is wrong — we need redraw every frame.
-  // Replace with a custom per-frame redraw.)
+  // 0 -> STRIKE_TRACER_MS: tracer line extends from attacker to target.
+  // We need to clear+restroke every frame, so this can't use the generic
+  // tween() helper — drive the tick directly.
   await new Promise<void>((resolve) => {
     const start = performance.now()
     const total = STRIKE_TRACER_MS

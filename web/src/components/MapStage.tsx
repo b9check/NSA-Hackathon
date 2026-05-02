@@ -21,6 +21,7 @@ import {
 import type { GameState, HexCell, UnitInstance, ViewMode } from '../types'
 import { COLORS, SIDE_COLOR } from '../theme'
 import {
+  refreshHpBar,
   syncBases,
   syncUnits,
   type BaseNode,
@@ -355,14 +356,13 @@ async function buildPixi(
             { hit: ev.hit, pkill: ev.pkill, damage: ev.damage },
           )
           if (ev.hit && tgt) {
-            // Optimistically reflect the new HP on the bar (resolver's truth
-            // syncs on the post-replay refetchState).
+            // Reflect the new HP on the bar immediately so the player
+            // sees the chunk vanish as the missile lands. The post-replay
+            // refetchState() reconciles to the resolver's truth.
             tgt.hp = ev.remaining_hp
-            // Repaint the HP bar via the existing reconciler helper.
             const node = nodeFor(ev.target)
             if (node) {
-              // forcing the lastHp mismatch causes drawHpBar to re-run
-              node.lastHp = -1
+              refreshHpBar(node, ev.remaining_hp, tgt.max_hp, tgt.side)
             }
             // shake the target
             await flashAndShake(tgtNode.container)
