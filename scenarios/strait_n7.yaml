@@ -1,56 +1,52 @@
-name: "Strait N-7 Crisis"
+name: "Bonifacio Strait Crisis"
 seed: 42
 turn_limit: 30
 
 # 20 cols x 15 rows. Pointy-top, odd-r offset.
-# O = water, P = open plain, U = urban, F = forest, M = mountain.
-# Two land masses N/S separated by a strait, small central neutral island = objective.
+# Terrain auto-derived from web/public/terrain.png by scripts/sample_terrain.py.
+# O = water, P = open, U = urban, F = forest, M = mountain.
 map:
   cols: 20
   rows: 15
   terrain: |
+    OOOMFPMMFFPPOOOOOOOO
+    OOOOFFPPPPPPOOOOOOOO
+    OOOOOOFPFPFOOOOOOOOO
+    OOOOOOOPPMOOOOOOOOOO
+    OOOOOOOFFFFOOOOOOOOO
+    OOOOOOOOOPOOOOOOOOOO
     OOOOOOOOOOOOOOOOOOOO
-    OOFMMMMFOOOOFMMMMFOO
-    OFFMUUMFOOOOFMUUMFFO
-    OFFFUFFFOOOOFFFUFFFO
-    OOFFFFFOOOOOOFFFFFOO
     OOOOOOOOOOOOOOOOOOOO
-    OOOOOOOOOPPPOOOOOOOO
-    OOOOOOOOPUUPOOOOOOOO
-    OOOOOOOOOPPPOOOOOOOO
     OOOOOOOOOOOOOOOOOOOO
-    OOFFFFFOOOOOOFFFFFOO
-    OFFFUFFFOOOOFFFUFFFO
-    OFFMUUMFOOOOFMUUMFFO
-    OOFMMMMFOOOOFMMMMFOO
+    OOOOOOOOOOOOOPOOOOOO
     OOOOOOOOOOOOOOOOOOOO
+    OOOOOOOOMPFFOPFPOOOO
+    OOOOOOOOOMPFFOOPOPOO
+    OOOOOOOOPFFFFPPOOOOO
+    OOOOOOOOOMFFFPMMOOOO
   objective_hexes:
-    - [9, 7]
-    - [10, 7]
+    - [13, 9]
+    - [9, 5]
 
 victory:
   capture_hold_turns: 2
   combat_power_threshold: 0.6
 
-# Starting positions chosen so each unit is on a domain-legal hex
-# (air anywhere, sea on water, land on non-water).
+# Auto-placed by scripts/sample_terrain.py (deterministic per seed).
 units:
-  # ---- Blue (south) ----
-  - { id: blue-aegis-1,   type: aegis,   pos: [5, 14] }
-  - { id: blue-f35-1,     type: f35,     pos: [10, 14] }
-  - { id: blue-mq9-1,     type: mq9,     pos: [15, 13] }
-  - { id: blue-patriot-1, type: patriot, pos: [4, 11] }
-  - { id: blue-m1a2-1,    type: m1a2,    pos: [15, 11] }
-  - { id: blue-mech-1,    type: mech_b,  pos: [5, 12] }
-  - { id: blue-mech-2,    type: mech_b,  pos: [14, 12] }
-
-  # ---- Red (north) ----
-  - { id: red-type055-1,  type: type055, pos: [5, 0] }
-  - { id: red-j20-1,      type: j20,     pos: [10, 0] }
-  - { id: red-recon-1,    type: recon_uav, pos: [15, 1] }
-  - { id: red-hq9-1,      type: hq9,     pos: [4, 3] }
-  - { id: red-mech-1,     type: mech_r,  pos: [5, 2] }
-  - { id: red-mech-2,     type: mech_r,  pos: [14, 2] }
-  - { id: red-shahed-1,   type: shahed,  pos: [3, 1] }
-  - { id: red-shahed-2,   type: shahed,  pos: [9, 1] }
-  - { id: red-shahed-3,   type: shahed,  pos: [16, 1] }
+  - { id: blue-aegis-1    , type: aegis     , pos: [13, 12] }
+  - { id: blue-f35-1      , type: f35       , pos: [ 8,  9] }
+  - { id: blue-mq9-1      , type: mq9       , pos: [ 6,  8] }
+  - { id: blue-patriot-1  , type: patriot   , pos: [15, 12] }
+  - { id: blue-m1a2-1     , type: m1a2      , pos: [10, 12] }
+  - { id: blue-mech-1     , type: mech_b    , pos: [ 9, 12] }
+  - { id: blue-mech-2     , type: mech_b    , pos: [13, 11] }
+  - { id: red-type055-1   , type: type055   , pos: [ 3,  2] }
+  - { id: red-j20-1       , type: j20       , pos: [ 0,  7] }
+  - { id: red-recon-1     , type: recon_uav , pos: [ 2,  1] }
+  - { id: red-hq9-1       , type: hq9       , pos: [ 7,  2] }
+  - { id: red-mech-1      , type: mech_r    , pos: [ 8,  1] }
+  - { id: red-mech-2      , type: mech_r    , pos: [ 4,  0] }
+  - { id: red-shahed-1    , type: shahed    , pos: [ 8,  0] }
+  - { id: red-shahed-2    , type: shahed    , pos: [ 6,  1] }
+  - { id: red-shahed-3    , type: shahed    , pos: [ 2,  3] }

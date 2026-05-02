@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react'
 import {
   Application,
+  Assets,
   Container,
   Graphics,
+  Sprite,
   Text,
   TextStyle,
 } from 'pixi.js'
-import type { FederatedPointerEvent, Ticker } from 'pixi.js'
+import type { FederatedPointerEvent } from 'pixi.js'
 import { GlowFilter } from 'pixi-filters'
 import { useStore } from '../store'
 import {
@@ -19,7 +21,7 @@ import {
   neighbors,
 } from '../hex'
 import type { GameState, HexCell, UnitInstance } from '../types'
-import { COLORS, TERRAIN_FILL, TERRAIN_DETAIL, SIDE_COLOR } from '../theme'
+import { COLORS, SIDE_COLOR } from '../theme'
 
 const PAD_X = 24
 const PAD_Y = 24
@@ -57,18 +59,30 @@ async function buildPixi(
   parent.appendChild(app.canvas)
   app.canvas.style.display = 'block'
 
-  // ---- Layers ----
+  // ---- Background: pre-rendered satellite-style terrain ----
+  // The PNG is sized to the full canvas (including PAD_X/PAD_Y), so it lives
+  // on app.stage directly, not under the PAD-offset `root`.
+  try {
+    const tex = await Assets.load('/terrain.png')
+    const bg = new Sprite(tex)
+    bg.x = 0
+    bg.y = 0
+    app.stage.addChildAt(bg, 0)
+  } catch (e) {
+    console.warn('terrain.png missing, falling back to flat panel bg', e)
+  }
+
+  // ---- Layers (everything below sits in PAD-offset root) ----
   const root = new Container()
   root.x = PAD_X
   root.y = PAD_Y
   app.stage.addChild(root)
 
-  const terrainLayer = new Container()
-  const detailLayer = new Container()
+  const gridLayer = new Container()
   const overlayLayer = new Container() // objective ring, reachability, ranges
   const hoverLayer = new Container()
   const unitLayer = new Container()
-  root.addChild(terrainLayer, detailLayer, overlayLayer, hoverLayer, unitLayer)
+  root.addChild(gridLayer, overlayLayer, hoverLayer, unitLayer)
 
   // Pre-compute hex centers
   const cellCenters = new Map<string, { x: number; y: number; cell: HexCell }>()
@@ -77,30 +91,9 @@ async function buildPixi(
     cellCenters.set(`${cell.col},${cell.row}`, { x, y, cell })
   }
 
-  // ---- Static terrain draw ----
-  drawTerrain(terrainLayer, detailLayer, state, cellCenters)
+  // ---- Tactical hex grid overlay (subtle) ----
+  drawHexGrid(gridLayer, state, cellCenters)
   drawObjectives(overlayLayer, state, cellCenters)
-
-  // ---- Animated water shimmer ----
-  const waterShimmer = new Graphics()
-  detailLayer.addChild(waterShimmer)
-  let t0 = 0
-  app.ticker.add((ticker: Ticker) => {
-    t0 += ticker.deltaMS
-    waterShimmer.clear()
-    const phase = (t0 / 2400) % 1
-    waterShimmer.alpha = 0.18
-    for (const cell of state.map.cells) {
-      if (cell.terrain !== 'water') continue
-      const c = cellCenters.get(`${cell.col},${cell.row}`)!
-      const yOff = Math.sin(phase * Math.PI * 2 + (c.x + c.y) * 0.04) * 1.4
-      waterShimmer.moveTo(c.x - HEX_SIZE * 0.6, c.y + yOff - 3)
-      waterShimmer.lineTo(c.x + HEX_SIZE * 0.6, c.y + yOff - 3)
-      waterShimmer.moveTo(c.x - HEX_SIZE * 0.4, c.y + yOff + 6)
-      waterShimmer.lineTo(c.x + HEX_SIZE * 0.4, c.y + yOff + 6)
-    }
-    waterShimmer.stroke({ color: TERRAIN_DETAIL.water, width: 1 })
-  })
 
   // ---- Hover layer (interactive map background) ----
   const hoverGraphics = new Graphics()
@@ -198,54 +191,20 @@ async function buildPixi(
 
 // ---------------- Drawing helpers ----------------
 
-function drawTerrain(
-  terrainLayer: Container,
-  detailLayer: Container,
+function drawHexGrid(
+  layer: Container,
   state: GameState,
   centers: Map<string, { x: number; y: number; cell: HexCell }>,
 ) {
-  const fill = new Graphics()
+  // Subtle tactical overlay — every hex outlined at low alpha so commanders
+  // can read positions without occluding the satellite-style backdrop.
   const outline = new Graphics()
-  const detail = new Graphics()
-  terrainLayer.addChild(fill, outline)
-  detailLayer.addChild(detail)
-
+  layer.addChild(outline)
   for (const cell of state.map.cells) {
     const c = centers.get(`${cell.col},${cell.row}`)!
-    const corners = hexCorners(c.x, c.y)
-    fill.poly(corners).fill(TERRAIN_FILL[cell.terrain])
     outline
-      .poly(corners)
-      .stroke({ color: COLORS.line, width: 1, alpha: 0.6 })
-
-    // per-terrain ornament
-    if (cell.terrain === 'mountain') {
-      // small triangle
-      detail
-        .moveTo(c.x - 7, c.y + 5)
-        .lineTo(c.x, c.y - 6)
-        .lineTo(c.x + 7, c.y + 5)
-        .lineTo(c.x - 7, c.y + 5)
-        .stroke({ color: TERRAIN_DETAIL.mountain, width: 1.5 })
-    } else if (cell.terrain === 'forest') {
-      // 3 trees as small filled circles
-      detail.circle(c.x - 6, c.y + 3, 1.8).fill(TERRAIN_DETAIL.forest)
-      detail.circle(c.x + 6, c.y + 3, 1.8).fill(TERRAIN_DETAIL.forest)
-      detail.circle(c.x, c.y - 4, 1.8).fill(TERRAIN_DETAIL.forest)
-    } else if (cell.terrain === 'urban') {
-      // small grid of 4 squares
-      for (let i = 0; i < 2; i++) {
-        for (let j = 0; j < 2; j++) {
-          detail
-            .rect(c.x - 5 + i * 6, c.y - 4 + j * 6, 3.5, 3.5)
-            .fill(TERRAIN_DETAIL.urban)
-        }
-      }
-    } else if (cell.terrain === 'open') {
-      // very subtle dot
-      detail.circle(c.x, c.y, 1).fill({ color: TERRAIN_DETAIL.open, alpha: 0.6 })
-    }
-    // water shimmer added separately in animation tick
+      .poly(hexCorners(c.x, c.y, HEX_SIZE * 0.985))
+      .stroke({ color: COLORS.fg, width: 0.6, alpha: 0.13 })
   }
 }
 
