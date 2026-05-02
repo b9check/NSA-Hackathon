@@ -27,7 +27,15 @@ import {
   type UnitNode,
 } from '../render/units'
 import { loadIcons } from '../render/icons'
-import { bindApp } from '../anim/tween'
+import { bindApp, tween, easeOutCubic, delay } from '../anim/tween'
+import {
+  animateDeath,
+  animateMovePath,
+  animateStrike,
+  flashAndShake,
+  popupText,
+} from '../anim/primitives'
+import { moveMsPerHex } from '../anim/timing'
 
 const PAD_X = 24
 const PAD_Y = 24
@@ -40,6 +48,8 @@ interface PixiHandles {
     selectedUnitId: string | null,
     viewMode: ViewMode,
   ) => void
+  /** Replay a server event log: tween moves, fire strikes, play deaths. */
+  playEvents: (events: any[], baseState: GameState) => Promise<void>
   destroy: () => void
 }
 
@@ -124,7 +134,8 @@ async function buildPixi(
   const orderLayer = new Container() // queued-order arrows / reticles
   const hoverLayer = new Container()
   const unitLayer = new Container()
-  root.addChild(gridLayer, fogLayer, overlayLayer, orderLayer, hoverLayer, unitLayer)
+  const fxLayer = new Container() // tracers, particles, popups
+  root.addChild(gridLayer, fogLayer, overlayLayer, orderLayer, hoverLayer, unitLayer, fxLayer)
 
   // Pre-compute hex centers
   const cellCenters = new Map<string, { x: number; y: number; cell: HexCell }>()
@@ -263,10 +274,110 @@ async function buildPixi(
 
   redraw(state, null, 'omniscient')
 
+  async function playEvents(events: any[], baseState: GameState): Promise<void> {
+    // Resolve a few helpers up front.
+    const unitsById = new Map(baseState.units.map((u) => [u.id, u]))
+    const basesById = new Map((baseState.bases ?? []).map((b) => [b.id, b]))
+    const nodeFor = (id: string) => unitNodes.get(id) ?? baseNodes.get(id)
+
+    for (const ev of events) {
+      switch (ev.type) {
+        case 'move': {
+          const node = unitNodes.get(ev.unit)
+          if (!node) break
+          const u = unitsById.get(ev.unit)
+          if (!u) break
+          const path = ev.path.map((h: [number, number]) => {
+            const c = cellCenters.get(`${h[0]},${h[1]}`)
+            return c ? { x: c.x, y: c.y } : { x: node.container.x, y: node.container.y }
+          })
+          await animateMovePath(node.container, path, moveMsPerHex(u))
+          break
+        }
+        case 'strike':
+        case 'overwatch_fire': {
+          const atkNode = nodeFor(ev.attacker)
+          const tgtNode = nodeFor(ev.target)
+          if (!atkNode || !tgtNode) break
+          const tgt = unitsById.get(ev.target) ?? basesById.get(ev.target)
+          await animateStrike(
+            fxLayer,
+            { x: atkNode.container.x, y: atkNode.container.y },
+            { x: tgtNode.container.x, y: tgtNode.container.y },
+            { hit: ev.hit, pkill: ev.pkill, damage: ev.damage },
+          )
+          if (ev.hit && tgt) {
+            // Optimistically reflect the new HP on the bar (resolver's truth
+            // syncs on the post-replay refetchState).
+            tgt.hp = ev.remaining_hp
+            // Repaint the HP bar via the existing reconciler helper.
+            const node = nodeFor(ev.target)
+            if (node) {
+              // forcing the lastHp mismatch causes drawHpBar to re-run
+              node.lastHp = -1
+            }
+            // shake the target
+            await flashAndShake(tgtNode.container)
+          }
+          break
+        }
+        case 'destroyed': {
+          const node = nodeFor(ev.entity_id)
+          if (!node) break
+          // popup death tag, then explode
+          popupText(
+            fxLayer,
+            node.container.x,
+            node.container.y - 12,
+            'DESTROYED',
+            COLORS.red,
+            900,
+          )
+          await animateDeath(node.container, fxLayer)
+          unitNodes.delete(ev.entity_id)
+          baseNodes.delete(ev.entity_id)
+          break
+        }
+        case 'capture': {
+          const c = cellCenters.get(`${ev.hex[0]},${ev.hex[1]}`)
+          if (c) {
+            popupText(
+              fxLayer,
+              c.x, c.y - 6,
+              ev.controller ? `${ev.side.toUpperCase()} CONTROLS` : `${ev.side.toUpperCase()} CAPTURING ${ev.counter}/${ev.threshold}`,
+              ev.side === 'blue' ? COLORS.blue : COLORS.red,
+              700,
+            )
+            await delay(120)
+          }
+          break
+        }
+        case 'scout_reveal': {
+          // brief pulse on revealed hexes
+          for (const [col, row] of ev.revealed_hexes) {
+            const c = cellCenters.get(`${col},${row}`)
+            if (!c) continue
+            const pulse = new Graphics()
+              .poly(hexCorners(c.x, c.y, HEX_SIZE * 0.95))
+              .stroke({ color: COLORS.green, width: 1.5, alpha: 0.7 })
+            fxLayer.addChild(pulse)
+            tween(pulse, { alpha: 0 }, 350, easeOutCubic).then(() => pulse.destroy())
+          }
+          await delay(200)
+          break
+        }
+        case 'turn_end':
+          // animations done; nothing to play
+          break
+      }
+    }
+  }
+
   return {
     app,
     hexHitTest: findHexAtPixel,
     redraw,
+    playEvents,
     destroy: () => {
       app.destroy(true, { children: true, texture: true })
     },
@@ -676,21 +787,34 @@ export function MapStage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game])
 
-  // redraw on selection / state / view-mode change OR pending-order change
-  const pendingOrdersVersion = useStore((s) =>
-    Object.keys(s.pendingOrders).length +
-    Object.values(s.pendingOrders).reduce(
-      (acc, o) => acc + (o.kind === 'STRIKE' ? 1 : 0), 0,
-    ),
-  )
-  // ^ cheap dep proxy: changes when count or kinds change. To force a redraw
-  // on every order edit we also subscribe to the underlying object via a JSON
-  // hash below.
+  // redraw on selection / state / view-mode change OR pending-order change.
   const pendingOrdersHash = useStore((s) => JSON.stringify(s.pendingOrders))
+  const replaying = useStore((s) => s.replaying)
   useEffect(() => {
     if (!handlesRef.current || !game) return
+    if (replaying) return // suppress reconcile during animation playback
     handlesRef.current.redraw(game, selectedUnitId, viewMode)
-  }, [game, selectedUnitId, viewMode, pendingOrdersHash, pendingOrdersVersion])
+  }, [game, selectedUnitId, viewMode, pendingOrdersHash, replaying])
+
+  // Replay any events queued by /api/resolve.
+  const pendingEvents = useStore((s) => s.pendingEvents)
+  useEffect(() => {
+    if (!pendingEvents || !handlesRef.current || !game) return
+    let cancelled = false
+    ;(async () => {
+      useStore.getState().setReplaying(true)
+      try {
+        await handlesRef.current!.playEvents(pendingEvents, game)
+      } finally {
+        if (cancelled) return
+        useStore.getState().setPendingEvents(null)
+        useStore.getState().setReplaying(false)
+        useStore.getState().refetchState().catch(() => {})
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingEvents])
 
   return <div ref={ref} className="w-full h-full overflow-auto" />
 }

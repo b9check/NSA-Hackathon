@@ -40,6 +40,12 @@ interface AppState {
   pendingOrders: Record<string, Order> // keyed by unit_id
   targeting: TargetingMode | null
   resolving: boolean
+  /** Set immediately after /api/resolve returns. MapStage subscribes,
+   *  animates each event in order, then clears + refetches state.json. */
+  pendingEvents: any[] | null
+  /** True while MapStage is mid-replay; redraw() short-circuits so
+   *  syncUnits doesn't snap positions and clobber move tweens. */
+  replaying: boolean
 
   setGame: (g: GameState) => void
   selectUnit: (id: string | null) => void
@@ -66,6 +72,9 @@ interface AppState {
   lockSide: (side: 'blue' | 'red') => Promise<void>
   /** Run the resolver if both sides are locked; ignored otherwise. */
   resolveTurn: () => Promise<void>
+
+  setPendingEvents: (events: any[] | null) => void
+  setReplaying: (b: boolean) => void
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -87,6 +96,8 @@ export const useStore = create<AppState>((set, get) => ({
   pendingOrders: {},
   targeting: null,
   resolving: false,
+  pendingEvents: null,
+  replaying: false,
 
   setGame: (g) => set({ game: g }),
   selectUnit: (id) => set({ selectedUnitId: id }),
@@ -202,15 +213,21 @@ export const useStore = create<AppState>((set, get) => ({
     if (!turnInfo?.blue_locked || !turnInfo?.red_locked) return
     set({ resolving: true })
     try {
-      await fetchJson('/api/resolve', { method: 'POST' })
-      // Animation hooks will pull events from the response in a later phase;
-      // for now, snap to new state.
-      set({ pendingOrders: {}, targeting: null })
-      await get().refetchState()
+      const res: any = await fetchJson('/api/resolve', { method: 'POST' })
+      // Stage events for the MapStage replay. It clears them when done
+      // and triggers a refetchState() to snap to the resolver's truth.
+      set({
+        pendingOrders: {},
+        targeting: null,
+        pendingEvents: res?.events ?? [],
+      })
     } catch (e) {
       console.error('resolveTurn failed', e)
     } finally {
       set({ resolving: false })
     }
   },
+
+  setPendingEvents: (events) => set({ pendingEvents: events }),
+  setReplaying: (b) => set({ replaying: b }),
 }))
