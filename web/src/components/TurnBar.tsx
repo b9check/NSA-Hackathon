@@ -39,6 +39,8 @@ function useTweenedNumber(target: number, ms = 600): number {
 }
 
 export function TurnBar() {
+  // ALL hooks must run unconditionally on every render — keep them above
+  // any early-returns. (Rules of hooks.)
   const game = useStore((s) => s.game)
   const turnInfo = useStore((s) => s.turnInfo)
   const viewMode = useStore((s) => s.viewMode)
@@ -47,6 +49,7 @@ export function TurnBar() {
   const resolveTurn = useStore((s) => s.resolveTurn)
   const resolving = useStore((s) => s.resolving)
   const pendingOrders = useStore((s) => s.pendingOrders)
+  const startMatch = useStore((s) => s.startMatch)
 
   if (!game || !turnInfo) {
     return (
@@ -66,7 +69,6 @@ export function TurnBar() {
   const redLocked = turnInfo.red_locked
   const canResolve = blueLocked && redLocked && !resolving
 
-  const startMatch = useStore((s) => s.startMatch)
   const lockBlue = async () => {
     startMatch()
     await lockSide('blue')
