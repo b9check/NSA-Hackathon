@@ -7,6 +7,7 @@ export function RegionPicker() {
   const swapError = useStore((s) => s.swapError)
   const game = useStore((s) => s.game)
   const swapRegion = useStore((s) => s.swapRegion)
+  const reroll = useStore((s) => s.reroll)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -28,9 +29,10 @@ export function RegionPicker() {
   }
 
   const currentName = game?.name ?? '—'
+  const seed = game?.seed
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative flex items-center gap-1">
       <button
         onClick={() => setOpen((v) => !v)}
         disabled={swapping}
@@ -46,7 +48,26 @@ export function RegionPicker() {
         <span className="text-amber">
           {swapping ? 'fetching tiles…' : currentName}
         </span>
+        {seed !== undefined && !swapping && (
+          <span className="text-mute opacity-60 ml-1 text-[10px]">
+            seed {seed}
+          </span>
+        )}
         <span className="text-mute opacity-60 ml-1">▾</span>
+      </button>
+      <button
+        onClick={() => reroll()}
+        disabled={swapping}
+        className={[
+          'h-8 w-8 flex items-center justify-center border border-line rounded-sm',
+          'text-[14px] leading-none',
+          swapping ? 'text-mute' : 'text-fg hover:bg-panel2 hover:text-amber',
+          'transition-colors',
+        ].join(' ')}
+        title="Reroll unit placements (same terrain, new seed)"
+        aria-label="Reroll units"
+      >
+        ⟲
       </button>
       {open && !swapping && (
         <div

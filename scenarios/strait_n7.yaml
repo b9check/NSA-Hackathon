@@ -1,5 +1,5 @@
 name: "Bonifacio Strait Crisis"
-seed: 42
+seed: 990727
 turn_limit: 30
 
 # 20 cols x 15 rows. Pointy-top, odd-r offset.
@@ -34,19 +34,19 @@ victory:
 
 # Auto-placed by scripts/sample_terrain.py (deterministic per seed).
 units:
-  - { id: blue-aegis-1    , type: aegis     , pos: [13, 12] }
-  - { id: blue-f35-1      , type: f35       , pos: [ 8,  9] }
-  - { id: blue-mq9-1      , type: mq9       , pos: [ 6,  8] }
-  - { id: blue-patriot-1  , type: patriot   , pos: [15, 12] }
-  - { id: blue-m1a2-1     , type: m1a2      , pos: [10, 12] }
-  - { id: blue-mech-1     , type: mech_b    , pos: [ 9, 12] }
-  - { id: blue-mech-2     , type: mech_b    , pos: [13, 11] }
-  - { id: red-type055-1   , type: type055   , pos: [ 3,  2] }
-  - { id: red-j20-1       , type: j20       , pos: [ 0,  7] }
-  - { id: red-recon-1     , type: recon_uav , pos: [ 2,  1] }
-  - { id: red-hq9-1       , type: hq9       , pos: [ 7,  2] }
-  - { id: red-mech-1      , type: mech_r    , pos: [ 8,  1] }
-  - { id: red-mech-2      , type: mech_r    , pos: [ 4,  0] }
-  - { id: red-shahed-1    , type: shahed    , pos: [ 8,  0] }
-  - { id: red-shahed-2    , type: shahed    , pos: [ 6,  1] }
-  - { id: red-shahed-3    , type: shahed    , pos: [ 2,  3] }
+  - { id: blue-aegis-1    , type: aegis     , pos: [ 3, 12] }
+  - { id: blue-f35-1      , type: f35       , pos: [18, 14] }
+  - { id: blue-mq9-1      , type: mq9       , pos: [ 0, 11] }
+  - { id: blue-patriot-1  , type: patriot   , pos: [ 9, 11] }
+  - { id: blue-m1a2-1     , type: m1a2      , pos: [13, 14] }
+  - { id: blue-mech-1     , type: mech_b    , pos: [12, 12] }
+  - { id: blue-mech-2     , type: mech_b    , pos: [10, 13] }
+  - { id: red-type055-1   , type: type055   , pos: [ 2,  4] }
+  - { id: red-j20-1       , type: j20       , pos: [ 2,  0] }
+  - { id: red-recon-1     , type: recon_uav , pos: [ 9,  7] }
+  - { id: red-hq9-1       , type: hq9       , pos: [11,  1] }
+  - { id: red-mech-1      , type: mech_r    , pos: [10,  2] }
+  - { id: red-mech-2      , type: mech_r    , pos: [ 9,  3] }
+  - { id: red-shahed-1    , type: shahed    , pos: [11,  0] }
+  - { id: red-shahed-2    , type: shahed    , pos: [12,  2] }
+  - { id: red-shahed-3    , type: shahed    , pos: [11,  2] }

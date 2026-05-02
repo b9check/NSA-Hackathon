@@ -82,70 +82,189 @@ def hex_in_bounds(col: int, row: int, cols: int, rows: int) -> bool:
     return 0 <= col < cols and 0 <= row < rows
 
 
-def find_hex(grid, predicate, rng, exclude: set, cols: int, rows: int):
-    """Pick a random hex matching predicate, excluding already-used positions."""
-    candidates = [
-        (c, r)
-        for r in range(rows) for c in range(cols)
-        if predicate(grid[r][c]) and (c, r) not in exclude
-    ]
-    if not candidates:
-        return None
-    return rng.choice(candidates)
+# ---- Hex topology helpers (mirrors engine/hex.py at low fidelity) ----
+_EVEN_NB = [(+1, 0), (-1, 0), (0, -1), (-1, -1), (0, +1), (-1, +1)]
+_ODD_NB = [(+1, 0), (-1, 0), (+1, -1), (0, -1), (+1, +1), (0, +1)]
+
+
+def neighbors(col: int, row: int) -> list[tuple[int, int]]:
+    deltas = _ODD_NB if (row & 1) else _EVEN_NB
+    return [(col + dc, row + dr) for dc, dr in deltas]
+
+
+def hex_distance(c1: int, r1: int, c2: int, r2: int) -> int:
+    def to_cube(c: int, r: int) -> tuple[int, int, int]:
+        x = c - (r - (r & 1)) // 2
+        z = r
+        y = -x - z
+        return x, y, z
+    ax, ay, az = to_cube(c1, r1)
+    bx, by, bz = to_cube(c2, r2)
+    return (abs(ax - bx) + abs(ay - by) + abs(az - bz)) // 2
+
+
+def is_coastal(grid, c: int, r: int, cols: int, rows: int) -> bool:
+    """Land hex with at least one water neighbor (good site for AAW radar)."""
+    if grid[r][c] == "water":
+        return False
+    for nc, nr in neighbors(c, r):
+        if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] == "water":
+            return True
+    return False
+
+
+def is_deep_water(grid, c: int, r: int, cols: int, rows: int) -> bool:
+    """Water hex with all 6 neighbors also water (no shore in spitting distance)."""
+    if grid[r][c] != "water":
+        return False
+    for nc, nr in neighbors(c, r):
+        if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] != "water":
+            return False
+    return True
 
 
 def place_units(grid, cols: int, rows: int, seed: int) -> list[dict]:
-    """Auto-place 16 units (7 Blue south + 9 Red north) on terrain-legal hexes."""
+    """Tactically-aware auto-placement of 7 Blue + 9 Red units.
+
+    Each unit has a stack of preferences (best-fit first, fallback later)
+    so we never get stuck on regions that lack ideal terrain.
+    """
     rng = random.Random(seed)
     used: set[tuple[int, int]] = set()
 
-    # Side-half filters
-    south = lambda c, r: r >= rows * 2 / 3
-    north = lambda c, r: r < rows / 3
-    south_mid = lambda c, r: r >= rows / 2
-    north_mid = lambda c, r: r < rows / 2
+    def all_hexes() -> list[tuple[int, int]]:
+        return [(c, r) for r in range(rows) for c in range(cols)]
 
-    def pick(side_pred, terrain_pred, fallback_terrain_pred=None):
-        cells = [
-            (c, r) for r in range(rows) for c in range(cols)
-            if side_pred(c, r) and terrain_pred(grid[r][c]) and (c, r) not in used
-        ]
-        if not cells and fallback_terrain_pred:
-            cells = [
-                (c, r) for r in range(rows) for c in range(cols)
-                if side_pred(c, r) and fallback_terrain_pred(grid[r][c]) and (c, r) not in used
-            ]
-        if not cells:
-            return None
-        c, r = rng.choice(cells)
-        used.add((c, r))
-        return [c, r]
+    def candidates(predicate) -> list[tuple[int, int]]:
+        return [(c, r) for c, r in all_hexes()
+                if (c, r) not in used and predicate(c, r)]
 
-    is_water = lambda t: t == "water"
-    is_land = lambda t: t != "water"
-    is_settled = lambda t: t in ("urban", "open")
+    def pick(*preds):
+        """Try each preference in order; return first that has candidates."""
+        for p in preds:
+            cands = candidates(p)
+            if cands:
+                pos = rng.choice(cands)
+                used.add(pos)
+                return [pos[0], pos[1]]
+        return None
+
+    def near(anchor: list[int] | None, max_dist: int):
+        """Predicate factory: within `max_dist` of `anchor` if anchor exists."""
+        if anchor is None:
+            return lambda c, r: False
+        ac, ar = anchor[0], anchor[1]
+        return lambda c, r: hex_distance(c, r, ac, ar) <= max_dist
+
+    # Side bands (more aggressive than half-split for character).
+    south_band  = lambda c, r: r >= rows - max(3, rows // 4)
+    north_band  = lambda c, r: r < max(3, rows // 4)
+    south_half  = lambda c, r: r >= rows / 2
+    north_half  = lambda c, r: r < rows / 2
+    south_push  = lambda c, r: rows / 2 <= r < rows - max(3, rows // 4)
+    north_push  = lambda c, r: max(3, rows // 4) <= r < rows / 2
+
+    is_water     = lambda c, r: grid[r][c] == "water"
+    is_land      = lambda c, r: grid[r][c] != "water"
+    is_settled   = lambda c, r: grid[r][c] in ("urban", "open")
+    is_coast     = lambda c, r: is_coastal(grid, c, r, cols, rows)
+    is_deep      = lambda c, r: is_deep_water(grid, c, r, cols, rows)
+    not_coastal  = lambda c, r: is_land(c, r) and not is_coast(c, r)
+
+    def AND(*ps):
+        return lambda c, r: all(p(c, r) for p in ps)
 
     units: list[dict] = []
 
-    # ---- Blue (south) ----
-    units.append({"id": "blue-aegis-1",   "type": "aegis",   "pos": pick(south_mid, is_water)})
-    units.append({"id": "blue-f35-1",     "type": "f35",     "pos": pick(south_mid, lambda t: True)})
-    units.append({"id": "blue-mq9-1",     "type": "mq9",     "pos": pick(south_mid, lambda t: True)})
-    units.append({"id": "blue-patriot-1", "type": "patriot", "pos": pick(south, is_settled, is_land)})
-    units.append({"id": "blue-m1a2-1",    "type": "m1a2",    "pos": pick(south, is_settled, is_land)})
-    units.append({"id": "blue-mech-1",    "type": "mech_b",  "pos": pick(south, is_land)})
-    units.append({"id": "blue-mech-2",    "type": "mech_b",  "pos": pick(south, is_land)})
+    # ============== Blue (south) ==============
+    # Aegis DDG: deep blue water on Blue's side — cruises in safe waters.
+    units.append({"id": "blue-aegis-1", "type": "aegis", "pos": pick(
+        AND(south_half, is_deep),
+        AND(south_half, is_water),
+        is_water,
+    )})
+    # F-35 stealth: in own backfield (3-row band along south edge).
+    units.append({"id": "blue-f35-1", "type": "f35", "pos": pick(
+        south_band,
+        south_half,
+    )})
+    # MQ-9 ISR: pushed forward from Blue base, scouting toward the strait.
+    units.append({"id": "blue-mq9-1", "type": "mq9", "pos": pick(
+        south_push,
+        south_half,
+    )})
+    # Patriot: coastal land on Blue side — strait airspace coverage.
+    units.append({"id": "blue-patriot-1", "type": "patriot", "pos": pick(
+        AND(south_half, is_coast, is_settled),
+        AND(south_half, is_coast, is_land),
+        AND(south_half, is_settled),
+        AND(south_half, is_land),
+    )})
+    # M1A2: settled inland on Blue side (not on the beach).
+    units.append({"id": "blue-m1a2-1", "type": "m1a2", "pos": pick(
+        AND(south_half, is_settled, not_coastal),
+        AND(south_half, is_settled),
+        AND(south_half, is_land),
+    )})
+    # Mech infantry pair: clustered, ideally near coast (potential amphib).
+    blue_mech_anchor = pick(
+        AND(south_half, is_coast, is_land),
+        AND(south_half, is_land),
+    )
+    units.append({"id": "blue-mech-1", "type": "mech_b", "pos": blue_mech_anchor})
+    units.append({"id": "blue-mech-2", "type": "mech_b", "pos": pick(
+        AND(south_half, near(blue_mech_anchor, 2), is_land),
+        AND(south_half, near(blue_mech_anchor, 4), is_land),
+        AND(south_half, is_land),
+    )})
 
-    # ---- Red (north) ----
-    units.append({"id": "red-type055-1",  "type": "type055",   "pos": pick(north_mid, is_water)})
-    units.append({"id": "red-j20-1",      "type": "j20",       "pos": pick(north_mid, lambda t: True)})
-    units.append({"id": "red-recon-1",    "type": "recon_uav", "pos": pick(north_mid, lambda t: True)})
-    units.append({"id": "red-hq9-1",      "type": "hq9",       "pos": pick(north, is_settled, is_land)})
-    units.append({"id": "red-mech-1",     "type": "mech_r",    "pos": pick(north, is_land)})
-    units.append({"id": "red-mech-2",     "type": "mech_r",    "pos": pick(north, is_land)})
-    units.append({"id": "red-shahed-1",   "type": "shahed",    "pos": pick(north_mid, lambda t: True)})
-    units.append({"id": "red-shahed-2",   "type": "shahed",    "pos": pick(north_mid, lambda t: True)})
-    units.append({"id": "red-shahed-3",   "type": "shahed",    "pos": pick(north_mid, lambda t: True)})
+    # ============== Red (north) ==============
+    units.append({"id": "red-type055-1", "type": "type055", "pos": pick(
+        AND(north_half, is_deep),
+        AND(north_half, is_water),
+        is_water,
+    )})
+    units.append({"id": "red-j20-1", "type": "j20", "pos": pick(
+        north_band,
+        north_half,
+    )})
+    units.append({"id": "red-recon-1", "type": "recon_uav", "pos": pick(
+        north_push,
+        north_half,
+    )})
+    units.append({"id": "red-hq9-1", "type": "hq9", "pos": pick(
+        AND(north_half, is_coast, is_settled),
+        AND(north_half, is_coast, is_land),
+        AND(north_half, is_settled),
+        AND(north_half, is_land),
+    )})
+    red_mech_anchor = pick(
+        AND(north_half, is_coast, is_land),
+        AND(north_half, is_land),
+    )
+    units.append({"id": "red-mech-1", "type": "mech_r", "pos": red_mech_anchor})
+    units.append({"id": "red-mech-2", "type": "mech_r", "pos": pick(
+        AND(north_half, near(red_mech_anchor, 2), is_land),
+        AND(north_half, near(red_mech_anchor, 4), is_land),
+        AND(north_half, is_land),
+    )})
+    # Shahed swarm: clustered around a launch site (Red rear).
+    shahed_launch = pick(
+        AND(north_band, is_land),
+        north_band,
+        north_half,
+    )
+    units.append({"id": "red-shahed-1", "type": "shahed", "pos": shahed_launch})
+    units.append({"id": "red-shahed-2", "type": "shahed", "pos": pick(
+        near(shahed_launch, 2),
+        near(shahed_launch, 4),
+        north_half,
+    )})
+    units.append({"id": "red-shahed-3", "type": "shahed", "pos": pick(
+        near(shahed_launch, 2),
+        near(shahed_launch, 4),
+        north_half,
+    )})
 
     return [u for u in units if u["pos"] is not None]
 
@@ -221,16 +340,18 @@ def main() -> int:
     p.add_argument("img", help="terrain.png to sample")
     p.add_argument("yaml", help="scenario YAML to rewrite")
     p.add_argument("--name", default=None, help="override scenario display name")
+    p.add_argument("--seed", type=int, default=None,
+                   help="override scenario seed (drives unit placement RNG)")
     args = p.parse_args()
     img_path, yaml_path = Path(args.img), Path(args.yaml)
     if not img_path.exists():
         print(f"missing {img_path}", file=sys.stderr)
         return 1
 
-    raw = yaml.safe_load(yaml_path.read_text())
-    cols = int(raw["map"]["cols"])
-    rows = int(raw["map"]["rows"])
-    seed = int(raw.get("seed", 42))
+    raw = yaml.safe_load(yaml_path.read_text()) if yaml_path.exists() else {}
+    cols = int(raw.get("map", {}).get("cols", 20))
+    rows = int(raw.get("map", {}).get("rows", 15))
+    seed = args.seed if args.seed is not None else int(raw.get("seed", 42))
     name = args.name or raw.get("name", "Strait N-7 Crisis")
 
     img = np.array(Image.open(img_path).convert("RGB"))

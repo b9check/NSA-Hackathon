@@ -45,7 +45,7 @@ function SwapOverlay() {
       <div className="flex flex-col items-center gap-3">
         <div className="w-8 h-8 border-2 border-amber border-t-transparent rounded-full animate-spin" />
         <div className="text-[11px] font-mono tracking-[0.2em] text-amber">
-          FETCHING SATELLITE TILES
+          REGENERATING SCENARIO
         </div>
       </div>
     </div>

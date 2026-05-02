@@ -27,6 +27,7 @@ interface AppState {
 
   loadRegions: () => Promise<void>
   swapRegion: (key: string) => Promise<void>
+  reroll: () => Promise<void>
   refetchState: () => Promise<void>
 }
 
@@ -69,6 +70,23 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       await fetchJson('/api/region/' + key, { method: 'POST' })
       // Bumping the version triggers App + MapStage to refetch / remount.
+      set({
+        assetVersion: get().assetVersion + 1,
+        selectedUnitId: null,
+      })
+      await get().refetchState()
+    } catch (e: any) {
+      set({ swapError: String(e?.message ?? e) })
+    } finally {
+      set({ swapping: false })
+    }
+  },
+
+  reroll: async () => {
+    // No tile fetch -> tiny spinner; reuse swapping flag for the overlay.
+    set({ swapping: true, swapError: null })
+    try {
+      await fetchJson('/api/reroll', { method: 'POST' })
       set({
         assetVersion: get().assetVersion + 1,
         selectedUnitId: null,

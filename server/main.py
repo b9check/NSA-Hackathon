@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 import sys
 import time
 from pathlib import Path
@@ -62,6 +63,7 @@ class RegionInfo(BaseModel):
 
 class ScenarioInfo(BaseModel):
     name: str
+    seed: int
     cols: int
     rows: int
     units: int
@@ -80,9 +82,17 @@ class CustomRegion(BaseModel):
 class SwapResult(BaseModel):
     ok: bool
     name: str
+    seed: int
     lat: float
     lng: float
     zoom: int
+    duration_ms: int
+
+
+class RerollResult(BaseModel):
+    ok: bool
+    name: str
+    seed: int
     duration_ms: int
 
 
@@ -138,6 +148,7 @@ async def current_scenario() -> ScenarioInfo:
     raw = yaml.safe_load(SCENARIO_PATH.read_text())
     return ScenarioInfo(
         name=raw["name"],
+        seed=int(raw.get("seed", 42)),
         cols=int(raw["map"]["cols"]),
         rows=int(raw["map"]["rows"]),
         units=len(raw.get("units", [])),
@@ -153,32 +164,38 @@ async def current_scenario() -> ScenarioInfo:
 PIPELINE_TIMEOUT_S = 45.0
 
 
-async def _run_pipeline(lat: float, lng: float, zoom: int, name: str) -> None:
-    """Invoke the existing CLI pipeline (fetch -> sample -> dump) in a
-    subprocess so we don't tie up the event loop and inherit the venv."""
-    cmds = [
-        [
+async def _run_pipeline(lat: float, lng: float, zoom: int, name: str,
+                        seed: int, *, fetch: bool = True) -> None:
+    """Invoke the existing CLI pipeline as subprocesses (so the venv is
+    inherited and the event loop stays free).
+
+    fetch=False skips the (slow) tile-fetch step — used by /api/reroll
+    when only the unit placements should change.
+    """
+    cmds: list[list[str]] = []
+    if fetch:
+        cmds.append([
             sys.executable,
             str(ROOT / "scripts" / "fetch_satellite.py"),
             str(TERRAIN_PATH),
             "--lat", str(lat),
             "--lng", str(lng),
             "--zoom", str(zoom),
-        ],
-        [
-            sys.executable,
-            str(ROOT / "scripts" / "sample_terrain.py"),
-            str(TERRAIN_PATH),
-            str(SCENARIO_PATH),
-            "--name", name,
-        ],
-        [
-            sys.executable,
-            str(ROOT / "scripts" / "dump_state.py"),
-            str(SCENARIO_PATH),
-            str(STATE_PATH),
-        ],
-    ]
+        ])
+    cmds.append([
+        sys.executable,
+        str(ROOT / "scripts" / "sample_terrain.py"),
+        str(TERRAIN_PATH),
+        str(SCENARIO_PATH),
+        "--name", name,
+        "--seed", str(seed),
+    ])
+    cmds.append([
+        sys.executable,
+        str(ROOT / "scripts" / "dump_state.py"),
+        str(SCENARIO_PATH),
+        str(STATE_PATH),
+    ])
 
     async def _inner() -> None:
         for cmd in cmds:
@@ -211,13 +228,19 @@ async def _run_pipeline(lat: float, lng: float, zoom: int, name: str) -> None:
         )
 
 
+def _fresh_seed() -> int:
+    return random.randint(1, 999_999)
+
+
 @app.post("/api/region/custom", response_model=SwapResult)
 async def swap_custom(body: CustomRegion) -> SwapResult:
     async with _swap_lock:
         t0 = time.monotonic()
-        await _run_pipeline(body.lat, body.lng, body.zoom, body.name)
+        seed = _fresh_seed()
+        await _run_pipeline(body.lat, body.lng, body.zoom, body.name, seed)
         return SwapResult(
-            ok=True, name=body.name, lat=body.lat, lng=body.lng, zoom=body.zoom,
+            ok=True, name=body.name, seed=seed,
+            lat=body.lat, lng=body.lng, zoom=body.zoom,
             duration_ms=int((time.monotonic() - t0) * 1000),
         )
 
@@ -232,12 +255,33 @@ async def swap_region(key: str) -> SwapResult:
     cfg = REGIONS[key]
     async with _swap_lock:
         t0 = time.monotonic()
-        await _run_pipeline(cfg["lat"], cfg["lng"], cfg["zoom"], cfg["name"])
+        seed = _fresh_seed()
+        await _run_pipeline(cfg["lat"], cfg["lng"], cfg["zoom"], cfg["name"], seed)
         return SwapResult(
             ok=True,
             name=cfg["name"],
+            seed=seed,
             lat=cfg["lat"],
             lng=cfg["lng"],
             zoom=cfg["zoom"],
+            duration_ms=int((time.monotonic() - t0) * 1000),
+        )
+
+
+@app.post("/api/reroll", response_model=RerollResult)
+async def reroll() -> RerollResult:
+    """Re-roll unit placements using a fresh seed. Keeps the current terrain
+    (no tile fetch). Sub-second."""
+    if not SCENARIO_PATH.exists():
+        raise HTTPException(404, "no scenario loaded yet")
+    raw = yaml.safe_load(SCENARIO_PATH.read_text())
+    name = raw.get("name", "Custom")
+    async with _swap_lock:
+        t0 = time.monotonic()
+        seed = _fresh_seed()
+        # lat/lng/zoom are unused when fetch=False; pass dummies.
+        await _run_pipeline(0.0, 0.0, 0, name, seed, fetch=False)
+        return RerollResult(
+            ok=True, name=name, seed=seed,
             duration_ms=int((time.monotonic() - t0) * 1000),
         )
