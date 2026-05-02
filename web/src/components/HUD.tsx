@@ -63,13 +63,13 @@ export function RightRail() {
 
   return (
     <div className="w-[360px] bg-panel border-l border-line flex flex-col h-full text-sm min-h-0">
-      <Section title="ORDER OF BATTLE" maxH="max-h-[34vh]">
+      <Section title="ORDER OF BATTLE" maxH="max-h-[13rem]">
         <RosterGroup label="BLUE" side="blue" units={blue} selectedId={selectedUnitId} onSelect={selectUnit} />
         <div className="h-2" />
         <RosterGroup label="RED" side="red" units={red} selectedId={selectedUnitId} onSelect={selectUnit} />
       </Section>
       {(blueBases.length > 0 || redBases.length > 0) && (
-        <Section title="BASES &amp; INSTALLATIONS" maxH="max-h-[18vh]">
+        <Section title="BASES" maxH="max-h-[7rem]">
           {blueBases.length > 0 && <BaseGroup label="BLUE" side="blue" bases={blueBases} />}
           {blueBases.length > 0 && redBases.length > 0 && <div className="h-2" />}
           {redBases.length > 0 && <BaseGroup label="RED" side="red" bases={redBases} />}
@@ -77,9 +77,6 @@ export function RightRail() {
       )}
       <Section title="SELECTED UNIT" grow>
         {selected ? <UnitDetail unit={selected} /> : <Empty />}
-      </Section>
-      <Section title="LEGEND" maxH="max-h-[20vh]">
-        <Legend />
       </Section>
     </div>
   )
