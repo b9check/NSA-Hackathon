@@ -108,6 +108,7 @@ export interface GameState {
   bases: BaseInstance[]
   victory: VictoryConfig
   starting_total?: Record<string, number>
+  objective_points?: Record<string, number>
 }
 
 

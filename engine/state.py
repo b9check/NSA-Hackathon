@@ -122,6 +122,11 @@ class GameState(BaseModel):
     # doesn't artificially flatten when destroyed units leave the list.
     # Keys: "blue", "red".
     starting_total: dict[str, float] = Field(default_factory=dict)
+    # Accumulated objective-control bonus, capped per side. Drives the
+    # second half of compute_scores().
+    objective_points: dict[str, float] = Field(
+        default_factory=lambda: {"blue": 0.0, "red": 0.0},
+    )
 
     def unit_by_id(self, uid: str) -> UnitInstance | None:
         return next((u for u in self.units if u.id == uid), None)

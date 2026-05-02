@@ -167,4 +167,5 @@ def load_scenario(path: str | Path) -> GameState:
         bases=base_instances,
         victory=victory,
         starting_total=starting_total,
+        objective_points={"blue": 0.0, "red": 0.0},
     )
