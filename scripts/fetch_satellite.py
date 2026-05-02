@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import math
 import sys
+import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
 
@@ -72,6 +74,11 @@ def lat_lng_to_tile(lat: float, lng: float, z: int) -> tuple[int, int]:
     return x, y
 
 
+PER_TILE_TIMEOUT = 8       # seconds per HTTP attempt
+PER_TILE_RETRIES = 2       # short — total per tile <= ~25s
+MAX_PARALLEL_FETCHES = 10  # tile server tolerates this comfortably
+
+
 def fetch_tile(z: int, x: int, y: int) -> Image.Image:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = CACHE_DIR / f"esri_{z}_{x}_{y}.jpg"
@@ -79,20 +86,17 @@ def fetch_tile(z: int, x: int, y: int) -> Image.Image:
         return Image.open(cache_path)
     url = ESRI_TILE_URL.format(z=z, x=x, y=y)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    last_err = None
-    for attempt in range(4):
+    last_err: Exception | None = None
+    for attempt in range(PER_TILE_RETRIES + 1):
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with urllib.request.urlopen(req, timeout=PER_TILE_TIMEOUT) as r:
                 data = r.read()
             cache_path.write_bytes(data)
             return Image.open(BytesIO(data))
         except Exception as e:  # noqa: BLE001
             last_err = e
-            time_to_wait = 1.5 ** attempt
-            sys.stdout.write(f"!retry({attempt+1})")
-            sys.stdout.flush()
-            import time
-            time.sleep(time_to_wait)
+            if attempt < PER_TILE_RETRIES:
+                time.sleep(0.6 * (attempt + 1))
     raise RuntimeError(f"failed to fetch tile {z}/{x}/{y}: {last_err}")
 
 
@@ -121,18 +125,50 @@ def _fetch_mosaic_at(zoom: int, center_x: int, center_y: int) -> Image.Image:
     mosaic_w = TILES_WIDE * TILE_PX
     mosaic_h = TILES_TALL * TILE_PX
     mosaic = Image.new("RGB", (mosaic_w, mosaic_h))
-    print(f"  fetching {TILES_WIDE}x{TILES_TALL} tiles around z={zoom} "
+    coords: list[tuple[int, int, int, int]] = [
+        (i, j, center_x - half_w + i, center_y - half_h + j)
+        for i in range(TILES_WIDE) for j in range(TILES_TALL)
+    ]
+    t0 = time.monotonic()
+    print(f"  fetching {len(coords)} tiles in parallel around z={zoom} "
           f"x={center_x} y={center_y}")
-    for i in range(TILES_WIDE):
-        for j in range(TILES_TALL):
-            tx = center_x - half_w + i
-            ty = center_y - half_h + j
-            tile = fetch_tile(zoom, tx, ty).convert("RGB")
+    with ThreadPoolExecutor(max_workers=MAX_PARALLEL_FETCHES) as ex:
+        futures = {
+            ex.submit(fetch_tile, zoom, x, y): (i, j)
+            for i, j, x, y in coords
+        }
+        done = 0
+        for fut in as_completed(futures):
+            i, j = futures[fut]
+            tile = fut.result().convert("RGB")
             mosaic.paste(tile, (i * TILE_PX, j * TILE_PX))
+            done += 1
             sys.stdout.write(".")
             sys.stdout.flush()
-    print()
+    print(f" {time.monotonic() - t0:.1f}s")
     return mosaic
+
+
+def prewarm(lat: float, lng: float, zoom: int) -> None:
+    """Touch every tile in this region's mosaic so the cache is hot.
+
+    Runs in parallel; safe to invoke from a background thread on server
+    startup. Errors are swallowed — pre-warming is best-effort.
+    """
+    cx, cy = lat_lng_to_tile(lat, lng, zoom)
+    half_w = TILES_WIDE // 2
+    half_h = TILES_TALL // 2
+    coords = [
+        (cx - half_w + i, cy - half_h + j)
+        for i in range(TILES_WIDE) for j in range(TILES_TALL)
+    ]
+    with ThreadPoolExecutor(max_workers=MAX_PARALLEL_FETCHES) as ex:
+        futs = [ex.submit(fetch_tile, zoom, x, y) for x, y in coords]
+        for f in as_completed(futs):
+            try:
+                f.result()
+            except Exception:
+                pass
 
 
 def main() -> int:

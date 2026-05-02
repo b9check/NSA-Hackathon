@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from scripts.setup_region import REGIONS  # noqa: E402
+from scripts.fetch_satellite import prewarm as _prewarm_region  # noqa: E402
 
 
 app = FastAPI(title="Wargame Gym Control Server")
@@ -90,6 +91,38 @@ async def healthz() -> dict:
     return {"ok": True}
 
 
+_prewarm_started = False
+
+
+@app.on_event("startup")
+async def _start_prewarm() -> None:
+    """Best-effort: fire off cache warming for every preset in the background
+    so the second click on any region is sub-second. Runs off-loop in a thread
+    pool so server startup isn't blocked by network."""
+    global _prewarm_started
+    if _prewarm_started:
+        return
+    _prewarm_started = True
+    loop = asyncio.get_running_loop()
+
+    async def warm_one(key: str, cfg: dict) -> None:
+        try:
+            await loop.run_in_executor(
+                None, _prewarm_region, cfg["lat"], cfg["lng"], cfg["zoom"]
+            )
+            print(f"  prewarmed {key:10s} -> {cfg['name']}")
+        except Exception as e:  # noqa: BLE001
+            print(f"  prewarm failed for {key}: {e}")
+
+    async def warm_all() -> None:
+        # Warm one region at a time so we don't slam the tile server with 80
+        # concurrent connections — within each region we still parallelize.
+        for key, cfg in REGIONS.items():
+            await warm_one(key, cfg)
+
+    asyncio.create_task(warm_all())
+
+
 @app.get("/api/regions", response_model=list[RegionInfo])
 async def list_regions() -> list[RegionInfo]:
     return [
@@ -112,6 +145,12 @@ async def current_scenario() -> ScenarioInfo:
         terrain_url="/terrain.png",
         state_url="/state.json",
     )
+
+
+# Hard upper bound for a single swap. Tiles fetch in parallel so a fresh
+# region is normally ~3-6s; cached regions are <1s. Anything over this means
+# the tile server is unhappy — fail fast instead of leaving the UI hanging.
+PIPELINE_TIMEOUT_S = 45.0
 
 
 async def _run_pipeline(lat: float, lng: float, zoom: int, name: str) -> None:
@@ -140,20 +179,36 @@ async def _run_pipeline(lat: float, lng: float, zoom: int, name: str) -> None:
             str(STATE_PATH),
         ],
     ]
-    for cmd in cmds:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            env=dict(os.environ),
-        )
-        out, _ = await proc.communicate()
-        if proc.returncode != 0:
-            raise HTTPException(
-                500,
-                f"pipeline step failed ({cmd[1].rsplit('/', 1)[-1]}):\n"
-                + out.decode(errors="replace")[-2000:],
+
+    async def _inner() -> None:
+        for cmd in cmds:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=dict(os.environ),
             )
+            try:
+                out, _ = await proc.communicate()
+            except asyncio.CancelledError:
+                proc.kill()
+                await proc.wait()
+                raise
+            if proc.returncode != 0:
+                raise HTTPException(
+                    500,
+                    f"pipeline step failed ({cmd[1].rsplit('/', 1)[-1]}):\n"
+                    + out.decode(errors="replace")[-2000:],
+                )
+
+    try:
+        await asyncio.wait_for(_inner(), timeout=PIPELINE_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            504,
+            f"pipeline exceeded {PIPELINE_TIMEOUT_S:.0f}s — "
+            "tile server is slow or unreachable. retry shortly.",
+        )
 
 
 @app.post("/api/region/custom", response_model=SwapResult)
