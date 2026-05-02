@@ -33,6 +33,14 @@ sys.path.insert(0, str(ROOT))
 
 from scripts.setup_region import REGIONS  # noqa: E402
 from scripts.fetch_satellite import prewarm as _prewarm_region  # noqa: E402
+from engine.events import Event  # noqa: E402
+from engine.orders import (  # noqa: E402
+    CaptureOrder, HoldOrder, MoveOrder, Order,
+    OverwatchOrder, ScoutOrder, StrikeOrder,
+)
+from engine.resolve import compute_scores, resolve_turn  # noqa: E402
+from engine.scenario import load_scenario  # noqa: E402
+from engine.state import GameState  # noqa: E402
 
 
 app = FastAPI(title="Wargame Gym Control Server")
@@ -49,8 +57,45 @@ SCENARIO_PATH = ROOT / "scenarios" / "strait_n7.yaml"
 TERRAIN_PATH = ROOT / "web" / "public" / "terrain.png"
 STATE_PATH = ROOT / "web" / "public" / "state.json"
 
-# Serialize region swaps so two users can't collide on the asset files.
+# Serialize region swaps + resolves so two users can't collide on the asset
+# files or the in-memory session.
 _swap_lock = asyncio.Lock()
+_session_lock = asyncio.Lock()
+
+
+# ----- In-memory turn session ----------------------------------------
+# We keep a live GameState in memory so resolve_turn() can mutate it. After
+# every state-changing op (resolve, region swap) we write back to
+# web/public/state.json so the frontend's static-file cache stays in sync.
+_session: dict = {
+    "state": None,            # GameState | None
+    "blue_orders": [],        # list[Order]
+    "red_orders": [],
+    "blue_locked": False,
+    "red_locked": False,
+    "last_events": [],        # list[Event] from the last resolve
+}
+
+
+def _ensure_state() -> GameState:
+    if _session["state"] is None:
+        _session["state"] = load_scenario(SCENARIO_PATH)
+    return _session["state"]
+
+
+def _persist_state() -> None:
+    state = _session["state"]
+    if state is None:
+        return
+    import json
+    STATE_PATH.write_text(json.dumps(state.model_dump(mode="json"), indent=2))
+
+
+def _reset_orders() -> None:
+    _session["blue_orders"] = []
+    _session["red_orders"] = []
+    _session["blue_locked"] = False
+    _session["red_locked"] = False
 
 
 class RegionInfo(BaseModel):
@@ -77,6 +122,40 @@ class CustomRegion(BaseModel):
     lng: float
     zoom: int = 11
     name: str = "Custom Region"
+
+
+class OrdersBody(BaseModel):
+    side: str            # "blue" | "red"
+    orders: list[dict]   # untyped: re-validated as Order discriminated union below
+    lock: bool = True
+
+
+class OrdersResult(BaseModel):
+    ok: bool
+    side: str
+    count: int
+    blue_locked: bool
+    red_locked: bool
+
+
+class TurnState(BaseModel):
+    turn: int
+    blue_score: float
+    red_score: float
+    blue_locked: bool
+    red_locked: bool
+    blue_orders_count: int
+    red_orders_count: int
+    pending_units: dict   # {"blue": [unit_id...], "red": [...]}
+
+
+class ResolveResult(BaseModel):
+    ok: bool
+    turn_started_at: int
+    turn_ended_at: int
+    events: list[dict]
+    blue_score: float
+    red_score: float
 
 
 class SwapResult(BaseModel):
@@ -257,6 +336,11 @@ async def swap_region(key: str) -> SwapResult:
         t0 = time.monotonic()
         seed = _fresh_seed()
         await _run_pipeline(cfg["lat"], cfg["lng"], cfg["zoom"], cfg["name"], seed)
+        # New scenario -> wipe session.
+        async with _session_lock:
+            _session["state"] = load_scenario(SCENARIO_PATH)
+            _reset_orders()
+            _session["last_events"] = []
         return SwapResult(
             ok=True,
             name=cfg["name"],
@@ -281,7 +365,129 @@ async def reroll() -> RerollResult:
         seed = _fresh_seed()
         # lat/lng/zoom are unused when fetch=False; pass dummies.
         await _run_pipeline(0.0, 0.0, 0, name, seed, fetch=False)
+        async with _session_lock:
+            _session["state"] = load_scenario(SCENARIO_PATH)
+            _reset_orders()
+            _session["last_events"] = []
         return RerollResult(
             ok=True, name=name, seed=seed,
             duration_ms=int((time.monotonic() - t0) * 1000),
         )
+
+
+# ============= Turn-flow endpoints =================================
+
+_ORDER_CTORS = {
+    "MOVE": MoveOrder,
+    "STRIKE": StrikeOrder,
+    "SCOUT": ScoutOrder,
+    "OVERWATCH": OverwatchOrder,
+    "HOLD": HoldOrder,
+    "CAPTURE": CaptureOrder,
+}
+
+
+def _parse_orders(raw_orders: list[dict]) -> list[Order]:
+    out: list[Order] = []
+    for o in raw_orders:
+        kind = o.get("kind")
+        ctor = _ORDER_CTORS.get(kind or "")
+        if ctor is None:
+            raise HTTPException(400, f"unknown order kind {kind!r}")
+        try:
+            out.append(ctor(**o))  # pydantic validates required fields
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(400, f"invalid order {o}: {e}")
+    return out
+
+
+@app.get("/api/turn", response_model=TurnState)
+async def get_turn_state() -> TurnState:
+    state = _ensure_state()
+    blue_score, red_score = compute_scores(state)
+    blue_pending = [
+        u.id for u in state.units if u.side == "blue"
+        and u.id not in {o.unit_id for o in _session["blue_orders"]}
+    ]
+    red_pending = [
+        u.id for u in state.units if u.side == "red"
+        and u.id not in {o.unit_id for o in _session["red_orders"]}
+    ]
+    return TurnState(
+        turn=state.turn,
+        blue_score=blue_score, red_score=red_score,
+        blue_locked=_session["blue_locked"],
+        red_locked=_session["red_locked"],
+        blue_orders_count=len(_session["blue_orders"]),
+        red_orders_count=len(_session["red_orders"]),
+        pending_units={"blue": blue_pending, "red": red_pending},
+    )
+
+
+@app.post("/api/orders", response_model=OrdersResult)
+async def submit_orders(body: OrdersBody) -> OrdersResult:
+    if body.side not in ("blue", "red"):
+        raise HTTPException(400, "side must be 'blue' or 'red'")
+    state = _ensure_state()
+    parsed = _parse_orders(body.orders)
+    # validate ids
+    own_ids = {u.id for u in state.units if u.side == body.side}
+    for o in parsed:
+        if o.unit_id not in own_ids:
+            raise HTTPException(400, f"unit {o.unit_id!r} not on side {body.side!r}")
+    async with _session_lock:
+        _session[f"{body.side}_orders"] = parsed
+        if body.lock:
+            _session[f"{body.side}_locked"] = True
+        else:
+            _session[f"{body.side}_locked"] = False
+        return OrdersResult(
+            ok=True, side=body.side, count=len(parsed),
+            blue_locked=_session["blue_locked"],
+            red_locked=_session["red_locked"],
+        )
+
+
+@app.post("/api/resolve", response_model=ResolveResult)
+async def resolve_endpoint() -> ResolveResult:
+    async with _session_lock:
+        if not (_session["blue_locked"] and _session["red_locked"]):
+            raise HTTPException(
+                409,
+                "both sides must lock orders before resolution. "
+                f"blue_locked={_session['blue_locked']}, "
+                f"red_locked={_session['red_locked']}",
+            )
+        state = _ensure_state()
+        # Auto-fill HOLD for any unordered own units (low friction default).
+        def _fill_holds(side: str) -> list[Order]:
+            existing = list(_session[f"{side}_orders"])
+            ordered_ids = {o.unit_id for o in existing}
+            for u in state.units:
+                if u.side == side and u.id not in ordered_ids:
+                    existing.append(HoldOrder(unit_id=u.id))
+            return existing
+        blue_orders = _fill_holds("blue")
+        red_orders = _fill_holds("red")
+        turn_started = state.turn
+        events: list[Event] = resolve_turn(state, blue_orders, red_orders)
+        _session["last_events"] = events
+        _reset_orders()
+        _persist_state()
+        blue_score, red_score = compute_scores(state)
+        return ResolveResult(
+            ok=True,
+            turn_started_at=turn_started,
+            turn_ended_at=state.turn,
+            events=[e.model_dump() for e in events],
+            blue_score=blue_score, red_score=red_score,
+        )
+
+
+@app.post("/api/turn/reset")
+async def reset_turn() -> dict:
+    """Clear queued orders + locks without advancing the turn (e.g. user
+    wants to redo this round of planning)."""
+    async with _session_lock:
+        _reset_orders()
+    return {"ok": True}

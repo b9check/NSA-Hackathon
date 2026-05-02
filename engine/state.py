@@ -118,6 +118,10 @@ class GameState(BaseModel):
     units: list[UnitInstance]
     bases: list[BaseInstance] = Field(default_factory=list)
     victory: VictoryConfig
+    # Pre-computed denominators for compute_scores so the score curve
+    # doesn't artificially flatten when destroyed units leave the list.
+    # Keys: "blue", "red".
+    starting_total: dict[str, float] = Field(default_factory=dict)
 
     def unit_by_id(self, uid: str) -> UnitInstance | None:
         return next((u for u in self.units if u.id == uid), None)

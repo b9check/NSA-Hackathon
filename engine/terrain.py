@@ -43,6 +43,13 @@ MOVE_COST: dict[tuple[str, Terrain], int] = {
     ("sea", Terrain.FOREST): INF,
     ("sea", Terrain.MOUNTAIN): INF,
     ("sea", Terrain.WATER): 1,
+    # Amphibious infantry: walks land, can paddle water at extra cost,
+    # can't climb mountains.
+    ("amphib", Terrain.OPEN): 1,
+    ("amphib", Terrain.URBAN): 2,
+    ("amphib", Terrain.FOREST): 2,
+    ("amphib", Terrain.MOUNTAIN): INF,
+    ("amphib", Terrain.WATER): 2,
 }
 
 
