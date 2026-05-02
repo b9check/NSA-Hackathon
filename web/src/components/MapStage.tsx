@@ -121,9 +121,10 @@ async function buildPixi(
   const gridLayer = new Container()
   const fogLayer = new Container() // dims non-visible hexes in side views
   const overlayLayer = new Container() // objective ring, reachability, ranges
+  const orderLayer = new Container() // queued-order arrows / reticles
   const hoverLayer = new Container()
   const unitLayer = new Container()
-  root.addChild(gridLayer, fogLayer, overlayLayer, hoverLayer, unitLayer)
+  root.addChild(gridLayer, fogLayer, overlayLayer, orderLayer, hoverLayer, unitLayer)
 
   // Pre-compute hex centers
   const cellCenters = new Map<string, { x: number; y: number; cell: HexCell }>()
@@ -179,11 +180,13 @@ async function buildPixi(
     onPointerDown(hex, u ?? null)
   })
 
-  // ---- Selection / overlays / fog ----
+  // ---- Selection / overlays / fog / orders ----
   const overlay = new Graphics()
   overlayLayer.addChild(overlay)
   const fogGfx = new Graphics()
   fogLayer.addChild(fogGfx)
+  const orderGfx = new Graphics()
+  orderLayer.addChild(orderGfx)
   const selectionGfx = new Graphics()
   selectionGfx.filters = [
     new GlowFilter({ distance: 12, outerStrength: 2, innerStrength: 0.4, color: COLORS.amber }),
@@ -207,6 +210,7 @@ async function buildPixi(
   ) {
     overlay.clear()
     fogGfx.clear()
+    orderGfx.clear()
     selectionGfx.clear()
 
     const selected = selectedUnitId
@@ -246,6 +250,9 @@ async function buildPixi(
       if (u.side === viewMode) return true
       return visibleHexes.has(`${u.col},${u.row}`)
     }, unitNodes)
+
+    // ---- Queued orders (above overlays, below units) ----
+    drawQueuedOrders(orderGfx, s, cellCenters, viewMode)
 
     // Selection ring (above units)
     if (selected) {
@@ -390,6 +397,225 @@ function drawSelectionRing(g: Graphics, cx: number, cy: number) {
     .stroke({ color: COLORS.amber, width: 2, alpha: 0.95 })
 }
 
+
+function drawQueuedOrders(
+  g: Graphics,
+  state: GameState,
+  centers: Map<string, { x: number; y: number; cell: HexCell }>,
+  viewMode: ViewMode,
+) {
+  const orders = useStore.getState().pendingOrders
+  for (const order of Object.values(orders)) {
+    const u = state.units.find((x) => x.id === order.unit_id)
+    if (!u) continue
+    // In side views, only show our own orders.
+    if (viewMode !== 'omniscient' && u.side !== viewMode) continue
+    const c = centers.get(`${u.col},${u.row}`)
+    if (!c) continue
+    const color = SIDE_COLOR[u.side]
+    switch (order.kind) {
+      case 'MOVE':
+      case 'CAPTURE':
+      case 'SCOUT': {
+        const tgt = centers.get(`${order.target_hex[0]},${order.target_hex[1]}`)
+        if (!tgt) break
+        const lineColor =
+          order.kind === 'CAPTURE' ? COLORS.amber :
+          order.kind === 'SCOUT'   ? COLORS.green :
+          color
+        drawDashedLine(g, c.x, c.y, tgt.x, tgt.y, lineColor)
+        drawArrowhead(g, c.x, c.y, tgt.x, tgt.y, lineColor)
+        if (order.kind === 'CAPTURE') {
+          drawFlag(g, tgt.x, tgt.y)
+        } else if (order.kind === 'SCOUT') {
+          drawScoutHalo(g, tgt.x, tgt.y)
+        }
+        break
+      }
+      case 'STRIKE': {
+        const tgtUnit = state.units.find((x) => x.id === order.target_id)
+        if (!tgtUnit) break
+        const tgt = centers.get(`${tgtUnit.col},${tgtUnit.row}`)
+        if (!tgt) break
+        // Solid line + reticle for strikes.
+        g.moveTo(c.x, c.y).lineTo(tgt.x, tgt.y)
+          .stroke({ color: 0xFF6B4D, width: 2.5, alpha: 0.9 })
+        drawReticle(g, tgt.x, tgt.y, 0xFF6B4D)
+        break
+      }
+      case 'OVERWATCH': {
+        // Small shield indicator above the unit.
+        drawShield(g, c.x + HEX_SIZE * 0.55, c.y - HEX_SIZE * 0.55, color)
+        break
+      }
+      case 'HOLD':
+        // No visual; HOLD is the default.
+        break
+    }
+  }
+}
+
+
+function drawDashedLine(
+  g: Graphics, x0: number, y0: number, x1: number, y1: number, color: number,
+) {
+  const dx = x1 - x0
+  const dy = y1 - y0
+  const len = Math.hypot(dx, dy)
+  if (len < 1) return
+  const ux = dx / len, uy = dy / len
+  const dash = 7
+  const gap = 5
+  let t = 0
+  while (t < len) {
+    const t2 = Math.min(t + dash, len)
+    g.moveTo(x0 + ux * t, y0 + uy * t)
+      .lineTo(x0 + ux * t2, y0 + uy * t2)
+    t = t2 + gap
+  }
+  g.stroke({ color, width: 1.8, alpha: 0.85 })
+}
+
+
+function drawArrowhead(
+  g: Graphics, x0: number, y0: number, x1: number, y1: number, color: number,
+) {
+  const dx = x1 - x0, dy = y1 - y0
+  const len = Math.hypot(dx, dy)
+  if (len < 1) return
+  const ux = dx / len, uy = dy / len
+  // backstep so the arrowhead sits inside the target hex
+  const tipX = x1 - ux * 6
+  const tipY = y1 - uy * 6
+  // perpendicular
+  const px = -uy, py = ux
+  const baseX = tipX - ux * 9
+  const baseY = tipY - uy * 9
+  g.poly([
+    tipX, tipY,
+    baseX + px * 5, baseY + py * 5,
+    baseX - px * 5, baseY - py * 5,
+  ]).fill({ color, alpha: 0.95 })
+}
+
+
+function drawReticle(g: Graphics, cx: number, cy: number, color: number) {
+  g.circle(cx, cy, 11).stroke({ color, width: 1.5, alpha: 0.9 })
+  // crosshairs with center gap
+  g.moveTo(cx - 14, cy).lineTo(cx - 4, cy)
+    .moveTo(cx + 4, cy).lineTo(cx + 14, cy)
+    .moveTo(cx, cy - 14).lineTo(cx, cy - 4)
+    .moveTo(cx, cy + 4).lineTo(cx, cy + 14)
+    .stroke({ color, width: 1.5, alpha: 0.9 })
+}
+
+
+function drawFlag(g: Graphics, cx: number, cy: number) {
+  // small flag glyph
+  g.moveTo(cx - 4, cy - 8).lineTo(cx - 4, cy + 8)
+    .stroke({ color: COLORS.amber, width: 1.5 })
+  g.poly([
+    cx - 4, cy - 8,
+    cx + 7, cy - 5,
+    cx - 4, cy - 2,
+  ]).fill({ color: COLORS.amber, alpha: 0.85 })
+}
+
+
+function drawScoutHalo(g: Graphics, cx: number, cy: number) {
+  g.poly(hexCorners(cx, cy, HEX_SIZE * 1.5))
+    .fill({ color: COLORS.green, alpha: 0.10 })
+    .stroke({ color: COLORS.green, width: 1, alpha: 0.5 })
+  // eye glyph
+  g.ellipse(cx, cy, 6, 3).stroke({ color: COLORS.green, width: 1.2 })
+  g.circle(cx, cy, 1.4).fill({ color: COLORS.green })
+}
+
+
+function drawShield(g: Graphics, cx: number, cy: number, color: number) {
+  // small shield outline
+  g.poly([
+    cx - 5, cy - 4,
+    cx + 5, cy - 4,
+    cx + 5, cy + 1,
+    cx, cy + 6,
+    cx - 5, cy + 1,
+  ])
+    .fill({ color: COLORS.bg, alpha: 0.85 })
+    .stroke({ color, width: 1.5 })
+}
+
+
+// Validate a click while in targeting mode. Returns true on commit.
+function commitTargetingClick(
+  t: import('../store').TargetingMode,
+  unit: UnitInstance,
+  hex: { col: number; row: number },
+  clickedUnit: UnitInstance | null,
+  game: GameState,
+): boolean {
+  const setOrder = useStore.getState().setOrder
+  const cancelTargeting = useStore.getState().cancelTargeting
+
+  // Click on the same unit -> cancel.
+  if (clickedUnit && clickedUnit.id === unit.id) {
+    cancelTargeting()
+    return true
+  }
+
+  switch (t.kind) {
+    case 'MOVE': {
+      // Validate via lightweight reachability mirroring drawReachability.
+      if (unit.speed <= 0) return false
+      if (hex.col === unit.col && hex.row === unit.row) return false
+      // For now, accept any hex within `speed` raw hex distance. The engine
+      // will compute the actual path; we get a free server-side validation.
+      if (hexDistance(unit.col, unit.row, hex.col, hex.row) > unit.speed)
+        return false
+      setOrder({
+        kind: 'MOVE', unit_id: unit.id,
+        target_hex: [hex.col, hex.row],
+      })
+      return true
+    }
+    case 'STRIKE': {
+      if (!clickedUnit) return false
+      if (clickedUnit.side === unit.side) return false
+      if (unit.weapon <= 0) return false
+      if (hexDistance(unit.col, unit.row, clickedUnit.col, clickedUnit.row) > unit.weapon)
+        return false
+      setOrder({
+        kind: 'STRIKE', unit_id: unit.id, target_id: clickedUnit.id,
+      })
+      return true
+    }
+    case 'SCOUT': {
+      if (unit.sensor <= 0) return false
+      // Allow any in-bounds hex; SCOUT bonus is +50% sensor for the turn.
+      const range = Math.max(1, unit.sensor + 1)
+      if (hexDistance(unit.col, unit.row, hex.col, hex.row) > range + unit.sensor)
+        return false
+      setOrder({
+        kind: 'SCOUT', unit_id: unit.id, target_hex: [hex.col, hex.row],
+      })
+      return true
+    }
+    case 'CAPTURE': {
+      if (!(unit.domain === 'land' || unit.domain === 'amphib')) return false
+      const isObjective = game.map.objective_hexes.some(
+        (o) => o.col === hex.col && o.row === hex.row,
+      )
+      if (!isObjective) return false
+      if (hexDistance(unit.col, unit.row, hex.col, hex.row) > 1) return false
+      setOrder({
+        kind: 'CAPTURE', unit_id: unit.id, target_hex: [hex.col, hex.row],
+      })
+      return true
+    }
+  }
+  return false
+}
+
 // ---------------- React wrapper ----------------
 
 export function MapStage() {
@@ -400,6 +626,8 @@ export function MapStage() {
   const viewMode = useStore((s) => s.viewMode)
   const selectUnit = useStore((s) => s.selectUnit)
   const setHover = useStore((s) => s.setHover)
+  const setOrder = useStore((s) => s.setOrder)
+  const cancelTargeting = useStore((s) => s.cancelTargeting)
 
   // mount once when game first loads
   useEffect(() => {
@@ -409,8 +637,27 @@ export function MapStage() {
       const h = await buildPixi(
         ref.current!,
         game,
-        (_hex, unit) => {
-          if (unit && unit.side === 'blue') selectUnit(unit.id)
+        (hex, unit) => {
+          // If targeting mode is active, the next click commits the order.
+          const st = useStore.getState()
+          const t = st.targeting
+          if (t && st.game) {
+            const own = st.game.units.find((u) => u.id === t.unitId)
+            if (!own) {
+              cancelTargeting()
+            } else if (hex && commitTargetingClick(t, own, hex, unit, st.game)) {
+              // setOrder already happened inside commitTargetingClick
+              return
+            } else {
+              // invalid click in targeting mode: keep mode active, no-op.
+              return
+            }
+            return
+          }
+          // Default selection behavior.
+          const playerSide: 'blue' | 'red' =
+            st.viewMode === 'red' ? 'red' : 'blue'
+          if (unit && unit.side === playerSide) selectUnit(unit.id)
           else selectUnit(null)
         },
         (hex) => setHover(hex),
@@ -429,11 +676,21 @@ export function MapStage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game])
 
-  // redraw on selection / state / view-mode change
+  // redraw on selection / state / view-mode change OR pending-order change
+  const pendingOrdersVersion = useStore((s) =>
+    Object.keys(s.pendingOrders).length +
+    Object.values(s.pendingOrders).reduce(
+      (acc, o) => acc + (o.kind === 'STRIKE' ? 1 : 0), 0,
+    ),
+  )
+  // ^ cheap dep proxy: changes when count or kinds change. To force a redraw
+  // on every order edit we also subscribe to the underlying object via a JSON
+  // hash below.
+  const pendingOrdersHash = useStore((s) => JSON.stringify(s.pendingOrders))
   useEffect(() => {
     if (!handlesRef.current || !game) return
     handlesRef.current.redraw(game, selectedUnitId, viewMode)
-  }, [game, selectedUnitId, viewMode])
+  }, [game, selectedUnitId, viewMode, pendingOrdersHash, pendingOrdersVersion])
 
   return <div ref={ref} className="w-full h-full overflow-auto" />
 }

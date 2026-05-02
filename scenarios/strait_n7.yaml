@@ -1,5 +1,5 @@
 name: "Galician Approach"
-seed: 750099
+seed: 541956
 turn_limit: 30
 
 # 20 cols x 15 rows. Pointy-top, odd-r offset.
@@ -34,28 +34,28 @@ victory:
 
 # Mobile platforms (auto-placed by scripts/sample_terrain.py per seed).
 units:
-  - { id: blue-cg47-1         , type: cg47            , pos: [ 7, 14] }
-  - { id: blue-f35-1          , type: f35a            , pos: [ 6, 12] }
-  - { id: blue-mq9-1          , type: mq9             , pos: [ 5,  9] }
+  - { id: blue-cg47-1         , type: cg47            , pos: [ 2, 11] }
+  - { id: blue-f35-1          , type: f35a            , pos: [16, 13] }
+  - { id: blue-mq9-1          , type: mq9             , pos: [ 2,  9] }
   - { id: blue-patriot-1      , type: patriot         , pos: [11, 12] }
-  - { id: blue-m1a2-1         , type: m1a2            , pos: [14, 13] }
-  - { id: blue-mech-1         , type: mech_b          , pos: [ 9, 11] }
-  - { id: blue-mech-2         , type: mech_b          , pos: [ 9,  9] }
-  - { id: red-type055-1       , type: type055         , pos: [ 6,  6] }
-  - { id: red-j20-1           , type: j20             , pos: [ 4,  0] }
-  - { id: red-recon-1         , type: recon_uav       , pos: [19,  5] }
+  - { id: blue-m1a2-1         , type: m1a2            , pos: [19, 11] }
+  - { id: blue-mech-1         , type: mech_b          , pos: [11,  9] }
+  - { id: blue-mech-2         , type: mech_b          , pos: [10, 11] }
+  - { id: red-type055-1       , type: type055         , pos: [ 1,  1] }
+  - { id: red-j20-1           , type: j20             , pos: [ 0,  1] }
+  - { id: red-recon-1         , type: recon_uav       , pos: [ 1,  5] }
   - { id: red-hq9-1           , type: hq9             , pos: [ 8,  4] }
-  - { id: red-mech-1          , type: mech_r          , pos: [ 6,  1] }
-  - { id: red-mech-2          , type: mech_r          , pos: [ 7,  2] }
-  - { id: red-shahed-1        , type: shahed          , pos: [ 9,  1] }
-  - { id: red-shahed-2        , type: shahed          , pos: [ 9,  2] }
-  - { id: red-shahed-3        , type: shahed          , pos: [ 8,  0] }
+  - { id: red-mech-1          , type: mech_r          , pos: [ 6,  0] }
+  - { id: red-mech-2          , type: mech_r          , pos: [ 8,  0] }
+  - { id: red-shahed-1        , type: shahed          , pos: [ 6,  1] }
+  - { id: red-shahed-2        , type: shahed          , pos: [ 5,  2] }
+  - { id: red-shahed-3        , type: shahed          , pos: [ 8,  1] }
 
 # Fixed installations (airbase / naval base / FOB / launch site).
 bases:
-  - { id: blue-airbase-1      , type: blue_airbase    , pos: [16, 13] }
-  - { id: blue-navalbase-1    , type: blue_navalbase  , pos: [11,  9] }
-  - { id: blue-fob-1          , type: blue_fob        , pos: [11,  8] }
+  - { id: blue-airbase-1      , type: blue_airbase    , pos: [15, 13] }
+  - { id: blue-navalbase-1    , type: blue_navalbase  , pos: [11, 11] }
+  - { id: blue-fob-1          , type: blue_fob        , pos: [10,  9] }
   - { id: red-airbase-1       , type: red_airbase     , pos: [ 7,  0] }
-  - { id: red-navalbase-1     , type: red_navalbase   , pos: [ 9,  5] }
-  - { id: red-launchsite-1    , type: red_launchsite  , pos: [ 9,  0] }
+  - { id: red-navalbase-1     , type: red_navalbase   , pos: [10,  7] }
+  - { id: red-launchsite-1    , type: red_launchsite  , pos: [11,  1] }
