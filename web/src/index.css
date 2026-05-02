@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: #0A0E14;
+  color: #E6EAF2;
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow: hidden;
+}
+
+/* Subtle scanline / grain over the whole UI for tactical-display vibe */
+#root::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(255,255,255,0.012) 0px,
+      rgba(255,255,255,0.012) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  z-index: 50;
+}
+
+.glow-blue { box-shadow: 0 0 12px rgba(77, 163, 255, 0.45); }
+.glow-red  { box-shadow: 0 0 12px rgba(255, 77, 94, 0.45); }
+.glow-amber{ box-shadow: 0 0 12px rgba(255, 184, 77, 0.45); }

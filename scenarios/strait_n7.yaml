@@ -1,0 +1,56 @@
+name: "Strait N-7 Crisis"
+seed: 42
+turn_limit: 30
+
+# 20 cols x 15 rows. Pointy-top, odd-r offset.
+# O = water, P = open plain, U = urban, F = forest, M = mountain.
+# Two land masses N/S separated by a strait, small central neutral island = objective.
+map:
+  cols: 20
+  rows: 15
+  terrain: |
+    OOOOOOOOOOOOOOOOOOOO
+    OOFMMMMFOOOOFMMMMFOO
+    OFFMUUMFOOOOFMUUMFFO
+    OFFFUFFFOOOOFFFUFFFO
+    OOFFFFFOOOOOOFFFFFOO
+    OOOOOOOOOOOOOOOOOOOO
+    OOOOOOOOOPPPOOOOOOOO
+    OOOOOOOOPUUPOOOOOOOO
+    OOOOOOOOOPPPOOOOOOOO
+    OOOOOOOOOOOOOOOOOOOO
+    OOFFFFFOOOOOOFFFFFOO
+    OFFFUFFFOOOOFFFUFFFO
+    OFFMUUMFOOOOFMUUMFFO
+    OOFMMMMFOOOOFMMMMFOO
+    OOOOOOOOOOOOOOOOOOOO
+  objective_hexes:
+    - [9, 7]
+    - [10, 7]
+
+victory:
+  capture_hold_turns: 2
+  combat_power_threshold: 0.6
+
+# Starting positions chosen so each unit is on a domain-legal hex
+# (air anywhere, sea on water, land on non-water).
+units:
+  # ---- Blue (south) ----
+  - { id: blue-aegis-1,   type: aegis,   pos: [5, 14] }
+  - { id: blue-f35-1,     type: f35,     pos: [10, 14] }
+  - { id: blue-mq9-1,     type: mq9,     pos: [15, 13] }
+  - { id: blue-patriot-1, type: patriot, pos: [4, 11] }
+  - { id: blue-m1a2-1,    type: m1a2,    pos: [15, 11] }
+  - { id: blue-mech-1,    type: mech_b,  pos: [5, 12] }
+  - { id: blue-mech-2,    type: mech_b,  pos: [14, 12] }
+
+  # ---- Red (north) ----
+  - { id: red-type055-1,  type: type055, pos: [5, 0] }
+  - { id: red-j20-1,      type: j20,     pos: [10, 0] }
+  - { id: red-recon-1,    type: recon_uav, pos: [15, 1] }
+  - { id: red-hq9-1,      type: hq9,     pos: [4, 3] }
+  - { id: red-mech-1,     type: mech_r,  pos: [5, 2] }
+  - { id: red-mech-2,     type: mech_r,  pos: [14, 2] }
+  - { id: red-shahed-1,   type: shahed,  pos: [3, 1] }
+  - { id: red-shahed-2,   type: shahed,  pos: [9, 1] }
+  - { id: red-shahed-3,   type: shahed,  pos: [16, 1] }
