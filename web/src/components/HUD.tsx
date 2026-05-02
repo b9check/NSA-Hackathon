@@ -61,14 +61,14 @@ export function RightRail() {
   const redBases = (game.bases ?? []).filter((b) => b.side === 'red')
 
   return (
-    <div className="w-[360px] bg-panel border-l border-line flex flex-col h-full text-sm">
-      <Section title="ORDER OF BATTLE">
+    <div className="w-[360px] bg-panel border-l border-line flex flex-col h-full text-sm min-h-0">
+      <Section title="ORDER OF BATTLE" maxH="max-h-[34vh]">
         <RosterGroup label="BLUE" side="blue" units={blue} selectedId={selectedUnitId} onSelect={selectUnit} />
         <div className="h-2" />
         <RosterGroup label="RED" side="red" units={red} selectedId={selectedUnitId} onSelect={selectUnit} />
       </Section>
       {(blueBases.length > 0 || redBases.length > 0) && (
-        <Section title="BASES &amp; INSTALLATIONS">
+        <Section title="BASES &amp; INSTALLATIONS" maxH="max-h-[18vh]">
           {blueBases.length > 0 && <BaseGroup label="BLUE" side="blue" bases={blueBases} />}
           {blueBases.length > 0 && redBases.length > 0 && <div className="h-2" />}
           {redBases.length > 0 && <BaseGroup label="RED" side="red" bases={redBases} />}
@@ -77,7 +77,7 @@ export function RightRail() {
       <Section title="SELECTED UNIT" grow>
         {selected ? <UnitDetail unit={selected} /> : <Empty />}
       </Section>
-      <Section title="LEGEND">
+      <Section title="LEGEND" maxH="max-h-[20vh]">
         <Legend />
       </Section>
     </div>
@@ -85,18 +85,33 @@ export function RightRail() {
 }
 
 function Section({
-  title, children, grow,
+  title, children, grow, maxH,
 }: {
   title: string
   children: React.ReactNode
   grow?: boolean
+  /** Tailwind max-h-* class for non-grow sections that can get long
+   *  (rosters, bases). Ignored when grow is set. */
+  maxH?: string
 }) {
   return (
-    <div className={`border-b border-line ${grow ? 'flex-1 min-h-0' : ''}`}>
-      <div className="px-4 py-2 text-[10px] tracking-[0.18em] font-mono text-mute">
+    <div
+      className={[
+        'border-b border-line flex flex-col min-h-0',
+        grow ? 'flex-1' : 'shrink-0',
+      ].join(' ')}
+    >
+      <div className="px-4 py-2 text-[10px] tracking-[0.18em] font-mono text-mute shrink-0">
         {title}
       </div>
-      <div className="px-4 pb-3 overflow-auto">{children}</div>
+      <div
+        className={[
+          'px-4 pb-3 overflow-y-auto overflow-x-hidden',
+          grow ? 'flex-1 min-h-0' : (maxH ?? ''),
+        ].join(' ')}
+      >
+        {children}
+      </div>
     </div>
   )
 }
