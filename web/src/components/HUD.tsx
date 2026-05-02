@@ -1,6 +1,7 @@
 import { useStore } from '../store'
 import type { UnitInstance } from '../types'
 import { RegionPicker } from './RegionPicker'
+import { ViewModeToggle } from './ViewModeToggle'
 
 const DOMAIN_LABEL: Record<string, string> = {
   air: 'AIR',
@@ -27,6 +28,7 @@ export function TopBar() {
         <FactionPill side="blue" />
         <FactionPill side="red" />
         <div className="w-px h-5 bg-line" />
+        <ViewModeToggle />
         <RegionPicker />
       </div>
     </div>
@@ -99,18 +101,38 @@ function RosterGroup({
   selectedId: string | null
   onSelect: (id: string | null) => void
 }) {
+  const viewMode = useStore((s) => s.viewMode)
+  const game = useStore((s) => s.game)
   const color = side === 'blue' ? 'text-blue' : 'text-red'
   const dot = side === 'blue' ? 'bg-blue' : 'bg-red'
+
+  // In a side view, an "own" roster entry is fully clickable; an enemy entry
+  // is shown but disabled, and units that aren't currently sensed are hidden.
+  let displayUnits = units
+  if (viewMode !== 'omniscient' && side !== viewMode && game) {
+    const visible = computeRosterVisibility(game, viewMode)
+    displayUnits = units.filter((u) => visible.has(`${u.col},${u.row}`))
+  }
+
   return (
     <div>
       <div className={`flex items-center gap-2 text-[11px] font-mono ${color} mb-1.5`}>
         <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
         {label}
+        {viewMode !== 'omniscient' && side !== viewMode && (
+          <span className="text-[9px] text-mute ml-1">
+            ({displayUnits.length}/{units.length} sensed)
+          </span>
+        )}
       </div>
       <div className="grid grid-cols-1 gap-0.5">
-        {units.map((u) => {
+        {displayUnits.map((u) => {
           const active = u.id === selectedId
-          const enabled = u.side === 'blue'
+          // Selectable when the unit's side matches the active player view
+          // (or in omniscient mode for the friendlies-as-Blue convention).
+          const enabled = viewMode === 'omniscient'
+            ? u.side === 'blue'
+            : u.side === viewMode
           return (
             <button
               key={u.id}
@@ -130,9 +152,43 @@ function RosterGroup({
             </button>
           )
         })}
+        {displayUnits.length === 0 && (
+          <div className="text-[10px] font-mono text-mute opacity-60 px-1 py-0.5">
+            no contacts
+          </div>
+        )}
       </div>
     </div>
   )
+}
+
+// Tiny copy of the visibility math so HUD components don't import from MapStage.
+// Accepts blue/red view modes; returns the set of (col,row) keys reachable
+// by ANY friendly unit's sensor range.
+function computeRosterVisibility(
+  game: import('../types').GameState,
+  side: 'blue' | 'red',
+): Set<string> {
+  const out = new Set<string>()
+  for (const u of game.units) {
+    if (u.side !== side) continue
+    for (const cell of game.map.cells) {
+      const d = hexDist(u.col, u.row, cell.col, cell.row)
+      if (d <= u.sensor) out.add(`${cell.col},${cell.row}`)
+    }
+  }
+  return out
+}
+
+function hexDist(ac: number, ar: number, bc: number, br: number) {
+  const a = toCube(ac, ar)
+  const b = toCube(bc, br)
+  return (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z)) / 2
+}
+function toCube(c: number, r: number) {
+  const x = c - (r - (r & 1)) / 2
+  const z = r
+  return { x, y: -x - z, z }
 }
 
 function UnitDetail({ unit }: { unit: UnitInstance }) {

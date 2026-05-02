@@ -1,5 +1,6 @@
 // Mirrors the engine.state pydantic models (JSON wire shape).
 export type Side = 'blue' | 'red'
+export type ViewMode = 'omniscient' | 'blue' | 'red'
 export type Domain = 'land' | 'air' | 'sea' | 'amphib'
 export type Terrain = 'open' | 'urban' | 'forest' | 'mountain' | 'water'
 

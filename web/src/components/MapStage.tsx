@@ -20,7 +20,7 @@ import {
   hexHeight,
   neighbors,
 } from '../hex'
-import type { GameState, HexCell, UnitInstance } from '../types'
+import type { GameState, HexCell, UnitInstance, ViewMode } from '../types'
 import { COLORS, SIDE_COLOR } from '../theme'
 
 const PAD_X = 24
@@ -29,8 +29,28 @@ const PAD_Y = 24
 interface PixiHandles {
   app: Application
   hexHitTest: (mx: number, my: number) => { col: number; row: number } | null
-  redraw: (state: GameState, selectedUnitId: string | null) => void
+  redraw: (
+    state: GameState,
+    selectedUnitId: string | null,
+    viewMode: ViewMode,
+  ) => void
   destroy: () => void
+}
+
+
+function computeVisibleHexes(state: GameState, mode: ViewMode): Set<string> {
+  // Empty set = "no fog filter"; caller treats omniscient specially.
+  const out = new Set<string>()
+  if (mode === 'omniscient') return out
+  for (const u of state.units) {
+    if (u.side !== mode) continue
+    for (const cell of state.map.cells) {
+      if (hexDistance(u.col, u.row, cell.col, cell.row) <= u.sensor) {
+        out.add(`${cell.col},${cell.row}`)
+      }
+    }
+  }
+  return out
 }
 
 async function buildPixi(
@@ -79,10 +99,11 @@ async function buildPixi(
   app.stage.addChild(root)
 
   const gridLayer = new Container()
+  const fogLayer = new Container() // dims non-visible hexes in side views
   const overlayLayer = new Container() // objective ring, reachability, ranges
   const hoverLayer = new Container()
   const unitLayer = new Container()
-  root.addChild(gridLayer, overlayLayer, hoverLayer, unitLayer)
+  root.addChild(gridLayer, fogLayer, overlayLayer, hoverLayer, unitLayer)
 
   // Pre-compute hex centers
   const cellCenters = new Map<string, { x: number; y: number; cell: HexCell }>()
@@ -144,20 +165,45 @@ async function buildPixi(
   unitLayer.addChild(unitGfx)
   const overlay = new Graphics()
   overlayLayer.addChild(overlay)
+  const fogGfx = new Graphics()
+  fogLayer.addChild(fogGfx)
   const selectionGfx = new Graphics()
   selectionGfx.filters = [
     new GlowFilter({ distance: 12, outerStrength: 2, innerStrength: 0.4, color: COLORS.amber }),
   ]
   unitLayer.addChild(selectionGfx)
 
-  function redraw(s: GameState, selectedUnitId: string | null) {
+  function redraw(
+    s: GameState,
+    selectedUnitId: string | null,
+    viewMode: ViewMode,
+  ) {
     overlay.clear()
     unitGfx.clear()
+    fogGfx.clear()
     selectionGfx.clear()
     for (const t of unitTexts) t.destroy()
     unitTexts.length = 0
 
-    const selected = selectedUnitId ? s.units.find((u) => u.id === selectedUnitId) : null
+    const selected = selectedUnitId
+      ? s.units.find((u) => u.id === selectedUnitId)
+      : null
+
+    // ---- Visibility (side views only) ----
+    const visibleHexes = computeVisibleHexes(s, viewMode)
+    const sideView = viewMode !== 'omniscient'
+
+    // ---- Fog of war: dim non-visible hexes ----
+    if (sideView) {
+      for (const cell of s.map.cells) {
+        const key = `${cell.col},${cell.row}`
+        if (visibleHexes.has(key)) continue
+        const c = cellCenters.get(key)!
+        fogGfx
+          .poly(hexCorners(c.x, c.y, HEX_SIZE * 1.04))
+          .fill({ color: 0x05080F, alpha: 0.78 })
+      }
+    }
 
     // ---- Reachability + sensor + weapon overlays for selected friendly ----
     if (selected) {
@@ -170,6 +216,10 @@ async function buildPixi(
     for (const u of s.units) {
       const c = cellCenters.get(`${u.col},${u.row}`)
       if (!c) continue
+      // In side view: own units always; enemies only if their hex is sensed.
+      if (sideView && u.side !== viewMode) {
+        if (!visibleHexes.has(`${u.col},${u.row}`)) continue
+      }
       drawUnit(unitGfx, unitTexts, unitLayer, u, c.x, c.y)
       if (selected && selected.id === u.id) {
         drawSelectionRing(selectionGfx, c.x, c.y)
@@ -177,7 +227,7 @@ async function buildPixi(
     }
   }
 
-  redraw(state, null)
+  redraw(state, null, 'omniscient')
 
   return {
     app,
@@ -378,6 +428,7 @@ export function MapStage() {
   const handlesRef = useRef<PixiHandles | null>(null)
   const game = useStore((s) => s.game)
   const selectedUnitId = useStore((s) => s.selectedUnitId)
+  const viewMode = useStore((s) => s.viewMode)
   const selectUnit = useStore((s) => s.selectUnit)
   const setHover = useStore((s) => s.setHover)
 
@@ -409,11 +460,11 @@ export function MapStage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game])
 
-  // redraw on selection / state change
+  // redraw on selection / state / view-mode change
   useEffect(() => {
     if (!handlesRef.current || !game) return
-    handlesRef.current.redraw(game, selectedUnitId)
-  }, [game, selectedUnitId])
+    handlesRef.current.redraw(game, selectedUnitId, viewMode)
+  }, [game, selectedUnitId, viewMode])
 
   return <div ref={ref} className="w-full h-full overflow-auto" />
 }

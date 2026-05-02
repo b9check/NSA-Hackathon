@@ -1,5 +1,5 @@
-name: "Bonifacio Strait Crisis"
-seed: 990727
+name: "Galician Approach"
+seed: 77594
 turn_limit: 30
 
 # 20 cols x 15 rows. Pointy-top, odd-r offset.
@@ -9,24 +9,24 @@ map:
   cols: 20
   rows: 15
   terrain: |
-    OOOMFPMMFFPPOOOOOOOO
-    OOOOFFPPPPPPOOOOOOOO
-    OOOOOOFPFPFOOOOOOOOO
-    OOOOOOOPPMOOOOOOOOOO
-    OOOOOOOFFFFOOOOOOOOO
-    OOOOOOOOOPOOOOOOOOOO
-    OOOOOOOOOOOOOOOOOOOO
-    OOOOOOOOOOOOOOOOOOOO
-    OOOOOOOOOOOOOOOOOOOO
-    OOOOOOOOOOOOOPOOOOOO
-    OOOOOOOOOOOOOOOOOOOO
-    OOOOOOOOMPFFOPFPOOOO
-    OOOOOOOOOMPFFOOPOPOO
-    OOOOOOOOPFFFFPPOOOOO
-    OOOOOOOOOMFFFPMMOOOO
+    OOOOOOFPFPFFFFFFFFFF
+    OOOOOOFFMFFFFFFFFFFP
+    OOOOOOFFFFFFFFFFFFFF
+    OOOOOOOOFFFFFFFFFFFF
+    OOOOOOOOPPFFFFFFFFFF
+    OOOOOOOOFMFFFFFPPFFF
+    OOOOOOOOOOOFFFFFFFFP
+    OOOOOOOOOOFPFFPFFFFF
+    OOOOOOOOOOFPFFFFFFFP
+    OOOOOOOOOFPPOFFFPFFF
+    OOOOOOOOOFFFOFFFFFFF
+    OOOOOOOOOMFFMFFFFFPP
+    OOOOOOOOOOOPFFFPFPPP
+    OOOOOOOOOOOFFFPPPFFF
+    OOOOOOOOOOOOMFMFPFFF
   objective_hexes:
-    - [13, 9]
-    - [9, 5]
+    - [8, 5]
+    - [10, 7]
 
 victory:
   capture_hold_turns: 2
@@ -34,19 +34,19 @@ victory:
 
 # Auto-placed by scripts/sample_terrain.py (deterministic per seed).
 units:
-  - { id: blue-aegis-1    , type: aegis     , pos: [ 3, 12] }
-  - { id: blue-f35-1      , type: f35       , pos: [18, 14] }
-  - { id: blue-mq9-1      , type: mq9       , pos: [ 0, 11] }
-  - { id: blue-patriot-1  , type: patriot   , pos: [ 9, 11] }
-  - { id: blue-m1a2-1     , type: m1a2      , pos: [13, 14] }
-  - { id: blue-mech-1     , type: mech_b    , pos: [12, 12] }
-  - { id: blue-mech-2     , type: mech_b    , pos: [10, 13] }
-  - { id: red-type055-1   , type: type055   , pos: [ 2,  4] }
-  - { id: red-j20-1       , type: j20       , pos: [ 2,  0] }
-  - { id: red-recon-1     , type: recon_uav , pos: [ 9,  7] }
-  - { id: red-hq9-1       , type: hq9       , pos: [11,  1] }
-  - { id: red-mech-1      , type: mech_r    , pos: [10,  2] }
-  - { id: red-mech-2      , type: mech_r    , pos: [ 9,  3] }
-  - { id: red-shahed-1    , type: shahed    , pos: [11,  0] }
-  - { id: red-shahed-2    , type: shahed    , pos: [12,  2] }
-  - { id: red-shahed-3    , type: shahed    , pos: [11,  2] }
+  - { id: blue-aegis-1    , type: aegis     , pos: [ 7, 12] }
+  - { id: blue-f35-1      , type: f35       , pos: [15, 14] }
+  - { id: blue-mq9-1      , type: mq9       , pos: [ 4,  8] }
+  - { id: blue-patriot-1  , type: patriot   , pos: [11, 12] }
+  - { id: blue-m1a2-1     , type: m1a2      , pos: [10,  9] }
+  - { id: blue-mech-1     , type: mech_b    , pos: [12,  8] }
+  - { id: blue-mech-2     , type: mech_b    , pos: [13,  8] }
+  - { id: red-type055-1   , type: type055   , pos: [ 2,  7] }
+  - { id: red-j20-1       , type: j20       , pos: [ 2,  2] }
+  - { id: red-recon-1     , type: recon_uav , pos: [ 7,  4] }
+  - { id: red-hq9-1       , type: hq9       , pos: [ 8,  4] }
+  - { id: red-mech-1      , type: mech_r    , pos: [ 6,  1] }
+  - { id: red-mech-2      , type: mech_r    , pos: [ 6,  0] }
+  - { id: red-shahed-1    , type: shahed    , pos: [ 9,  1] }
+  - { id: red-shahed-2    , type: shahed    , pos: [10,  1] }
+  - { id: red-shahed-3    , type: shahed    , pos: [11,  1] }

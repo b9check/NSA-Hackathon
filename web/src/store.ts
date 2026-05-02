@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { GameState, UnitInstance } from './types'
+import type { GameState, UnitInstance, ViewMode } from './types'
 
 export interface RegionMeta {
   key: string
@@ -19,11 +19,13 @@ interface AppState {
   assetVersion: number
   swapping: boolean
   swapError: string | null
+  viewMode: ViewMode
 
   setGame: (g: GameState) => void
   selectUnit: (id: string | null) => void
   setHover: (h: { col: number; row: number } | null) => void
   selectedUnit: () => UnitInstance | null
+  setViewMode: (m: ViewMode) => void
 
   loadRegions: () => Promise<void>
   swapRegion: (key: string) => Promise<void>
@@ -45,6 +47,7 @@ export const useStore = create<AppState>((set, get) => ({
   assetVersion: 1,
   swapping: false,
   swapError: null,
+  viewMode: 'omniscient',
 
   setGame: (g) => set({ game: g }),
   selectUnit: (id) => set({ selectedUnitId: id }),
@@ -54,6 +57,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (!game || !selectedUnitId) return null
     return game.units.find((u) => u.id === selectedUnitId) ?? null
   },
+  setViewMode: (m) => set({ viewMode: m, selectedUnitId: null }),
 
   loadRegions: async () => {
     try {
