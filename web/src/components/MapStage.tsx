@@ -5,8 +5,6 @@ import {
   Container,
   Graphics,
   Sprite,
-  Text,
-  TextStyle,
 } from 'pixi.js'
 import type { FederatedPointerEvent } from 'pixi.js'
 import { GlowFilter } from 'pixi-filters'
@@ -22,6 +20,12 @@ import {
 } from '../hex'
 import type { GameState, HexCell, UnitInstance, ViewMode } from '../types'
 import { COLORS, SIDE_COLOR } from '../theme'
+import {
+  syncBases,
+  syncUnits,
+  type BaseNode,
+  type UnitNode,
+} from '../render/units'
 
 const PAD_X = 24
 const PAD_Y = 24
@@ -167,10 +171,7 @@ async function buildPixi(
     onPointerDown(hex, u ?? null)
   })
 
-  // ---- Unit + selection draw ----
-  const unitGfx = new Graphics()
-  const unitTexts: Text[] = []
-  unitLayer.addChild(unitGfx)
+  // ---- Selection / overlays / fog ----
   const overlay = new Graphics()
   overlayLayer.addChild(overlay)
   const fogGfx = new Graphics()
@@ -181,27 +182,33 @@ async function buildPixi(
   ]
   unitLayer.addChild(selectionGfx)
 
+  // ---- Per-unit / per-base Containers (reconciled, not redrawn) ----
+  // unitLayer ordering: bases below, then units above.
+  const baseHost = new Container()
+  const unitHost = new Container()
+  unitLayer.addChild(baseHost, unitHost)
+  // selectionGfx already added above; ensure it sits on top of units.
+  unitLayer.setChildIndex(selectionGfx, unitLayer.children.length - 1)
+  const unitNodes: Map<string, UnitNode> = new Map()
+  const baseNodes: Map<string, BaseNode> = new Map()
+
   function redraw(
     s: GameState,
     selectedUnitId: string | null,
     viewMode: ViewMode,
   ) {
     overlay.clear()
-    unitGfx.clear()
     fogGfx.clear()
     selectionGfx.clear()
-    for (const t of unitTexts) t.destroy()
-    unitTexts.length = 0
 
     const selected = selectedUnitId
       ? s.units.find((u) => u.id === selectedUnitId)
       : null
 
-    // ---- Visibility (side views only) ----
     const visibleHexes = computeVisibleHexes(s, viewMode)
     const sideView = viewMode !== 'omniscient'
 
-    // ---- Fog of war: dim non-visible hexes ----
+    // ---- Fog ----
     if (sideView) {
       for (const cell of s.map.cells) {
         const key = `${cell.col},${cell.row}`
@@ -213,35 +220,29 @@ async function buildPixi(
       }
     }
 
-    // ---- Reachability + sensor + weapon overlays for selected friendly ----
     if (selected) {
       drawReachability(overlay, s, selected, cellCenters)
       drawSensorRing(overlay, selected, cellCenters)
       drawWeaponRing(overlay, selected, cellCenters)
     }
 
-    // ---- Bases (drawn under mobile units) ----
-    for (const b of s.bases ?? []) {
-      const c = cellCenters.get(`${b.col},${b.row}`)
-      if (!c) continue
-      if (sideView && b.side !== viewMode) {
-        if (!visibleHexes.has(`${b.col},${b.row}`)) continue
-      }
-      drawBase(unitGfx, unitTexts, unitLayer, b, c.x, c.y)
-    }
+    // ---- Reconcile units + bases (per-id Containers) ----
+    syncBases(baseHost, s, (b) => {
+      if (!sideView) return true
+      if (b.side === viewMode) return true
+      return visibleHexes.has(`${b.col},${b.row}`)
+    }, baseNodes)
 
-    // ---- Units ----
-    for (const u of s.units) {
-      const c = cellCenters.get(`${u.col},${u.row}`)
-      if (!c) continue
-      // In side view: own units always; enemies only if their hex is sensed.
-      if (sideView && u.side !== viewMode) {
-        if (!visibleHexes.has(`${u.col},${u.row}`)) continue
-      }
-      drawUnit(unitGfx, unitTexts, unitLayer, u, c.x, c.y)
-      if (selected && selected.id === u.id) {
-        drawSelectionRing(selectionGfx, c.x, c.y)
-      }
+    syncUnits(unitHost, s, (u) => {
+      if (!sideView) return true
+      if (u.side === viewMode) return true
+      return visibleHexes.has(`${u.col},${u.row}`)
+    }, unitNodes)
+
+    // Selection ring (above units)
+    if (selected) {
+      const c = cellCenters.get(`${selected.col},${selected.row}`)
+      if (c) drawSelectionRing(selectionGfx, c.x, c.y)
     }
   }
 
@@ -376,106 +377,9 @@ function drawWeaponRing(
   }
 }
 
-function drawUnit(
-  g: Graphics,
-  texts: Text[],
-  layer: Container,
-  u: UnitInstance,
-  cx: number,
-  cy: number,
-) {
-  const color = SIDE_COLOR[u.side]
-  const r = HEX_SIZE * 0.55
-
-  if (u.side === 'blue') {
-    // rounded rect (friendly)
-    g.roundRect(cx - r, cy - r * 0.7, r * 2, r * 1.4, 5)
-      .fill({ color: COLORS.bg, alpha: 0.85 })
-      .stroke({ color, width: 2 })
-  } else {
-    // diamond (hostile)
-    g.poly([cx, cy - r, cx + r, cy, cx, cy + r, cx - r, cy])
-      .fill({ color: COLORS.bg, alpha: 0.85 })
-      .stroke({ color, width: 2 })
-  }
-
-  // domain glyph letter
-  const style = new TextStyle({
-    fontFamily: 'IBM Plex Mono',
-    fontSize: 13,
-    fontWeight: '600',
-    fill: color,
-    align: 'center',
-  })
-  const t = new Text({ text: u.glyph, style })
-  t.anchor.set(0.5)
-  t.x = cx
-  t.y = cy + 0.5
-  layer.addChild(t)
-  texts.push(t)
-
-  // stealth marker (small dot)
-  if (u.stealth) {
-    g.circle(cx + r * 0.85, cy - r * 0.6, 2.2).fill(COLORS.fg)
-  }
-
-  // mini HP bar
-  const barW = r * 1.6
-  const ratio = Math.max(0, Math.min(1, u.hp / Math.max(u.hp, hpFromGlyph(u))))
-  g.rect(cx - barW / 2, cy + r * 0.85, barW, 2.5).fill({ color: COLORS.line, alpha: 0.9 })
-  g.rect(cx - barW / 2, cy + r * 0.85, barW * ratio, 2.5).fill(color)
-}
-
-// Heuristic: at game start hp == max_hp, so this is exact for turn 0.
-// Keeping a default-by-glyph as a safety net for later turns until state.json adds max_hp.
-function hpFromGlyph(u: UnitInstance) {
-  // domain-domain default ceilings
-  const map: Record<string, number> = { A: 3, U: 1, N: 8, S: 3, T: 6, I: 4 }
-  return map[u.glyph] ?? u.hp
-}
-
 function drawSelectionRing(g: Graphics, cx: number, cy: number) {
   g.poly(hexCorners(cx, cy, HEX_SIZE * 1.0))
     .stroke({ color: COLORS.amber, width: 2, alpha: 0.95 })
-}
-
-function drawBase(
-  g: Graphics,
-  texts: Text[],
-  layer: Container,
-  b: import('../types').BaseInstance,
-  cx: number,
-  cy: number,
-) {
-  // Bases render as a wider, flatter pentagonal "fortified" shape so they
-  // read as installations rather than mobile units. Side colour is desaturated
-  // (use the dim variant) so live units pop visually.
-  const color = b.side === 'blue' ? 0x2C6FB3 : 0xB33745
-  const r = HEX_SIZE * 0.62
-  // Pentagon-ish footprint: rectangle base + chevron top.
-  const pts = [
-    cx - r,        cy + r * 0.55,
-    cx + r,        cy + r * 0.55,
-    cx + r,        cy - r * 0.15,
-    cx,            cy - r * 0.65,
-    cx - r,        cy - r * 0.15,
-  ]
-  g.poly(pts)
-    .fill({ color: COLORS.bg, alpha: 0.85 })
-    .stroke({ color, width: 2 })
-  // tiny embedded "B" label
-  const style = new TextStyle({
-    fontFamily: 'IBM Plex Mono',
-    fontSize: 11,
-    fontWeight: '700',
-    fill: color,
-  })
-  const t = new Text({ text: 'B', style })
-  t.anchor.set(0.5)
-  t.x = cx
-  t.y = cy + 1
-  layer.addChild(t)
-  texts.push(t)
 }
 
 // ---------------- React wrapper ----------------
