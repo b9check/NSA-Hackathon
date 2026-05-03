@@ -22,14 +22,14 @@ export function TopBar() {
       <div className="text-amber font-semibold tracking-widest">{game.name.toUpperCase()}</div>
       <div className="mx-5 w-px h-5 bg-line" />
       <span className="text-[10px] tracking-[0.2em] text-mute mr-2">WIN&nbsp;IF</span>
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 mr-6">
         <WinChip label={`HP ≤ ${hpThresholdPct}%`}  tip={`Break enemy total HP below ${hpThresholdPct}% of starting`} />
         <WinChipSep />
         <WinChip label="ANNIHILATION"               tip="Eliminate every enemy unit AND base" />
         <WinChipSep />
-        <WinChip label={`T${turnCap} • HIGHER HP`}  tip={`At turn ${turnCap}, side with higher HP%% wins (tie = draw)`} />
+        <WinChip label={`T${turnCap} HP%`}          tip={`At turn ${turnCap}, side with higher HP%% wins (tie = draw)`} />
       </div>
-      <div className="ml-auto flex items-center gap-3">
+      <div className="ml-auto flex items-center gap-3 flex-shrink-0">
         <FactionPill side="blue" />
         <FactionPill side="red" />
         <div className="w-px h-5 bg-line mx-1" />
