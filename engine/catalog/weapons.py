@@ -59,9 +59,9 @@ WEAPONS: dict[str, Weapon] = {
     # ---- Air ----
     "kamikaze": Weapon(
         key="kamikaze", display="OWA Warhead", kind="kamikaze",
-        range=0, damage=3, ammo=1, self_destruct=True,
+        range=1, damage=3, ammo=1, self_destruct=True,
         target_domains=("land", "air", "sea"),
-        notes="One-way attack munition. Attacker detonates on target hex.",
+        notes="One-way attack munition. Drone strikes from adjacent and dies on detonation.",
     ),
     "aam_asm": Weapon(
         key="aam_asm", display="AAM / ASM", kind="missile",

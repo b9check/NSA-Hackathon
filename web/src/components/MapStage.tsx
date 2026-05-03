@@ -922,8 +922,14 @@ function commitTargetingClick(
   const setOrder = useStore.getState().setOrder
   const cancelTargeting = useStore.getState().cancelTargeting
 
-  // Click on the same unit -> cancel.
-  if (clickedUnit && clickedUnit.id === unit.id) {
+  // Click on the same unit -> cancel — EXCEPT during STRIKE, where a
+  // range-0 weapon (kamikaze) legitimately targets the attacker's own
+  // hex. Without this carve-out, range-0 strikes get swallowed as a
+  // 'cancel'.
+  if (
+    clickedUnit && clickedUnit.id === unit.id &&
+    t.kind !== 'STRIKE'
+  ) {
     cancelTargeting()
     return true
   }

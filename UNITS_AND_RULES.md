@@ -173,9 +173,9 @@ No weapon. Eyes of the team. Two modes per turn:
 
 | Weapon | Range | Damage | Ammo | Hits             | Notes                          |
 |--------|-------|--------|------|------------------|--------------------------------|
-| OWA warhead | 0 | 3 | 1 | ground, sea, air | self-destruct: attacker dies after firing (whiff or not) |
+| OWA warhead | 1 | 3 | 1 | ground, sea, air | self-destruct: attacker dies after firing (whiff or not) |
 
-One-shot loitering munition. Fly into target hex, detonate.
+One-shot loitering munition. Fly adjacent to target, detonate. Drone dies on launch.
 
 ---
 
@@ -248,7 +248,7 @@ mechanic) is set per-instance in the scenario, not by base subtype.
 | armor            | gnd | 6  | 2  | 1    | —     | 1       | 2       | ∞    | -       |
 | missile_launcher | gnd | 3  | 0  | 1    | 4     | 4       | 2       | 4    | -       |
 | scout_drone      | air | 1  | 4  | 2*   | —     | —       | —       | —    | -       |
-| strike_drone     | air | 1  | 3  | 1    | —     | 0†      | 3       | 1    | -       |
+| strike_drone     | air | 1  | 3  | 1    | —     | 1†      | 3       | 1    | -       |
 | fighter          | air | 3  | 4  | 1    | 3     | 3       | 2       | 4    | Y       |
 | bomber           | air | 5  | 2  | 1    | —     | 2       | 4       | 2    | -       |
 | destroyer        | sea | 8  | 2  | 1    | 3     | 4       | 2       | 6    | -       |
