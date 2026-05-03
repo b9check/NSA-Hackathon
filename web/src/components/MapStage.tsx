@@ -880,21 +880,27 @@ export function MapStage() {
   const setOrder = useStore((s) => s.setOrder)
   const cancelTargeting = useStore((s) => s.cancelTargeting)
 
-  // Mount Pixi ONCE per MapStage instance. We deliberately don't depend
-  // on `game` here — depending on it would tear down + rebuild Pixi
-  // every time game changes (e.g. each pass of the hot-seat 2-POV
-  // replay, which swaps game between snapshots). MapStage already
-  // remounts on assetVersion changes via key={assetVersion} in App, so
-  // region swaps / regens still rebuild Pixi correctly.
+  // Mount-only teardown. Runs once per MapStage instance — destroys
+  // Pixi when the component truly unmounts (e.g. region swap remounts
+  // via key=assetVersion). This is split from the build effect so
+  // game-state mutations don't tear Pixi down.
   useEffect(() => {
-    if (!ref.current) return
-    const initialGame = useStore.getState().game
-    if (!initialGame) return
+    return () => {
+      handlesRef.current?.destroy()
+      handlesRef.current = null
+    }
+  }, [])
+
+  // Build Pixi the first time `game` is available. Bails on subsequent
+  // game changes (handlesRef.current is already set) — those are
+  // reconciled by the redraw effect, not by rebuilding the app.
+  useEffect(() => {
+    if (!game || !ref.current || handlesRef.current) return
     let cancelled = false
     ;(async () => {
       const h = await buildPixi(
         ref.current!,
-        initialGame,
+        game,
         (hex, unit) => {
           // If targeting mode is active, the next click commits the order.
           const st = useStore.getState()
@@ -904,10 +910,8 @@ export function MapStage() {
             if (!own) {
               cancelTargeting()
             } else if (hex && commitTargetingClick(t, own, hex, unit, st.game)) {
-              // setOrder already happened inside commitTargetingClick
               return
             } else {
-              // invalid click in targeting mode: keep mode active, no-op.
               return
             }
             return
@@ -926,13 +930,13 @@ export function MapStage() {
       }
       handlesRef.current = h
     })()
-    return () => {
-      cancelled = true
-      handlesRef.current?.destroy()
-      handlesRef.current = null
-    }
+    // The cleanup here only cancels an in-flight async build (if `game`
+    // changes mid-build, we don't want a stale Pixi to land in
+    // handlesRef). It does NOT destroy a built Pixi — the mount-only
+    // effect above owns that.
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [game])
 
   // redraw on selection / state / view-mode change OR pending-order change.
   const pendingOrdersHash = useStore((s) => JSON.stringify(s.pendingOrders))
