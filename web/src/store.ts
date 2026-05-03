@@ -78,6 +78,9 @@ interface AppState {
   swapRegion: (key: string) => Promise<void>
   reroll: () => Promise<void>
   refetchState: () => Promise<void>
+  /** Free action — flip a unit's radar ON/OFF, then refetch state.
+   *  Doesn't consume a turn order; persists immediately on the server. */
+  toggleSensor: (unitId: string, sensorKey: string, active: boolean) => Promise<void>
 
   // ---- Turn flow -------------------------------------------------
   /** Pull the latest turn meta (scores, locks, counts) from /api/turn. */
@@ -255,6 +258,19 @@ export const useStore = create<AppState>((set, get) => ({
       set({ swapError: String(e?.message ?? e) })
     } finally {
       set({ swapping: false })
+    }
+  },
+
+  toggleSensor: async (unitId, sensorKey, active) => {
+    try {
+      await fetchJson('/api/sensor/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unit_id: unitId, sensor_key: sensorKey, active }),
+      })
+      await get().refetchState()
+    } catch (e) {
+      console.error('toggleSensor failed', e)
     }
   },
 

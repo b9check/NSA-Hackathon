@@ -25,12 +25,24 @@ def _sensor_refs(keys: tuple[str, ...]) -> list[SensorRef]:
     out: list[SensorRef] = []
     for k in keys:
         s = SENSORS[k]
+        # Radars default OFF — player flips them ON via /api/sensor/toggle
+        # when they actually want long-range coverage (and accept the
+        # emission visibility). Passive sensors (eo/ir/sigint/sonar) are
+        # always on.
+        is_active = s.modality != "radar"
         out.append(SensorRef(
             key=s.key, display=s.display, modality=s.modality, range=s.range,
             los_required=s.los_required, detects_stealth=s.detects_stealth,
-            target_domains=list(s.target_domains), emits=s.emits, notes=s.notes,
+            target_domains=list(s.target_domains), emits=s.emits,
+            is_active=is_active, notes=s.notes,
         ))
     return out
+
+
+def _summary_sensor_range(sensors: list[SensorRef]) -> int:
+    """Max range across only ACTIVE sensors. Radars contribute only when
+    powered on; passives always count."""
+    return max((s.range for s in sensors if s.is_active), default=0)
 
 
 def _weapon_refs(keys: tuple[str, ...]) -> list[WeaponRef]:
@@ -64,7 +76,9 @@ def _platform_to_unit(u: dict, p: Platform) -> UnitInstance:
         domain=p.domain,
         glyph=p.glyph,
         speed=p.speed,
-        sensor=p.summary_sensor_range(),
+        # Live summary range: only counts sensors currently active. Radars
+        # don't contribute until the player turns them on.
+        sensor=_summary_sensor_range(sensors),
         weapon=p.summary_weapon_range(),
         cost=p.cost,
         stealth=p.stealth,
@@ -77,7 +91,7 @@ def _base_to_instance(b: dict, bt: Base) -> BaseInstance:
     col, row = b["pos"]
     sensors = _sensor_refs(bt.sensors)
     weapons = _weapon_refs(bt.weapons)
-    sensor_max = max((s.range for s in sensors), default=0)
+    sensor_max = _summary_sensor_range(sensors)
     weapon_max = max((w.range for w in weapons), default=0)
     side = b["side"]
     spawns = list(b.get("spawns", bt.spawns))

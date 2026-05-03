@@ -25,6 +25,10 @@ export interface SensorRef {
   detects_stealth: boolean
   target_domains: string[]
   emits: boolean
+  /** False = sensor is currently OFF and doesn't contribute to the unit's
+   *  summary range. Radars default to OFF and toggle via /api/sensor/toggle.
+   *  Passive sensors (eo/ir/sigint/sonar) are always on. */
+  is_active: boolean
   notes: string
 }
 

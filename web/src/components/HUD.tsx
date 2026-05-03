@@ -282,16 +282,7 @@ function UnitDetail({ unit }: { unit: UnitInstance }) {
         <Stat label="GLYPH"  value={unit.glyph} />
       </div>
       {unit.sensors.length > 0 && (
-        <SubsystemList
-          title="SENSORS"
-          items={unit.sensors.map((s) => ({
-            key: s.key,
-            primary: s.display,
-            badge: s.modality,
-            badgeClass: SENSOR_BADGE[s.modality] ?? 'text-mute',
-            meta: `range ${s.range}${s.emits ? ' · emits' : ''}${s.los_required ? ' · LOS' : ''}`,
-          }))}
-        />
+        <SensorList unit={unit} canCommand={canCommand} />
       )}
       {unit.weapons.length > 0 && (
         <SubsystemList
@@ -325,6 +316,59 @@ function humanKind(k: WeaponRef['kind']): string {
     kamikaze: 'OWA',
     bomb: 'BOMB',
   } as Record<string, string>)[k] ?? k.toUpperCase()
+}
+
+
+function SensorList({ unit, canCommand }: { unit: UnitInstance; canCommand: boolean }) {
+  const toggleSensor = useStore((s) => s.toggleSensor)
+  return (
+    <div>
+      <div className="text-[10px] tracking-[0.18em] text-mute mb-1">SENSORS</div>
+      <div className="space-y-1">
+        {unit.sensors.map((s) => {
+          const togglable = s.modality === 'radar'
+          const meta = `range ${s.range}${s.emits ? ' · emits' : ''}${s.los_required ? ' · LOS' : ''}`
+          return (
+            <div
+              key={s.key}
+              className="flex items-center gap-2 px-2 py-1 rounded-sm bg-panel2/40 border border-line/60 text-[11px] font-mono"
+            >
+              <span className={`shrink-0 text-[10px] tracking-widest ${SENSOR_BADGE[s.modality] ?? 'text-mute'}`}>
+                {s.modality.toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-fg truncate">{s.display}</div>
+                <div className="text-mute text-[10px]">{meta}</div>
+              </div>
+              {togglable ? (
+                <button
+                  disabled={!canCommand}
+                  onClick={() => toggleSensor(unit.id, s.key, !s.is_active)}
+                  title={canCommand
+                    ? (s.is_active ? 'Radar ON — click to power down' : 'Radar OFF — click to power up')
+                    : 'Switch to your side to toggle this radar'
+                  }
+                  className={[
+                    'shrink-0 h-6 px-2 rounded-sm border text-[9px] font-semibold tracking-widest transition-colors',
+                    s.is_active
+                      ? 'border-amber text-amber bg-amber/10 hover:bg-amber/20'
+                      : 'border-line text-mute hover:text-fg hover:bg-panel2',
+                    !canCommand && 'opacity-40 cursor-not-allowed',
+                  ].filter(Boolean).join(' ')}
+                >
+                  {s.is_active ? '● ON' : '○ OFF'}
+                </button>
+              ) : (
+                <span className="shrink-0 text-[9px] tracking-widest text-mute opacity-60 px-2">
+                  PASSIVE
+                </span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 function weaponMeta(w: WeaponRef): string {
