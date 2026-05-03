@@ -14,9 +14,24 @@ const DOMAIN_LABEL: Record<string, string> = {
 export function TopBar() {
   const game = useStore((s) => s.game)
   if (!game) return null
+  // Sim clock: minutes-per-turn defaults to 30 if backend hasn't propagated
+  // the field yet. Render as "D+0 14:32Z" so the audience reads operational
+  // tempo at a glance.
+  const minPerTurn = (game as any).minutes_per_turn ?? 30
+  const clockMin = (game as any).sim_clock_minutes ?? (game.turn * minPerTurn)
+  const day = Math.floor(clockMin / 1440)
+  const minOfDay = clockMin % 1440
+  const hh = Math.floor(minOfDay / 60).toString().padStart(2, '0')
+  const mm = (minOfDay % 60).toString().padStart(2, '0')
   return (
     <div className="h-12 bg-panel border-b border-line flex items-center px-5 text-sm font-mono">
       <div className="text-amber font-semibold tracking-widest">{game.name.toUpperCase()}</div>
+      <div className="mx-5 w-px h-5 bg-line" />
+      <div className="text-fg font-mono tabular-nums tracking-wider">
+        <span className="text-mute text-[10px] mr-2">SIM</span>
+        <span className="text-amber font-semibold">D+{day} {hh}:{mm}</span>
+        <span className="text-mute text-[10px] ml-1">Z</span>
+      </div>
       <div className="ml-auto flex items-center gap-3 flex-shrink-0">
         <ViewModeToggle />
         <div className="w-px h-5 bg-line mx-1" />
@@ -383,6 +398,9 @@ function UnitDetail({ unit }: { unit: UnitInstance }) {
               suffix={unit.weapon === 0 ? 'ISR' : 'hex'} />
         <Stat label="GLYPH"  value={unit.glyph} />
       </div>
+      {(unit.endurance_minutes ?? 0) > 0 && (
+        <SortiePanel unit={unit} />
+      )}
       {unit.sensors.length > 0 && (
         <SensorList unitId={unit.id} sensors={unit.sensors} canCommand={canCommand} />
       )}
@@ -510,6 +528,44 @@ function MissionPanel({ unit }: { unit: UnitInstance }) {
   )
 }
 
+
+function SortiePanel({ unit }: { unit: UnitInstance }) {
+  const endurance = unit.endurance_minutes ?? 0
+  const onStation = unit.time_in_air_minutes ?? 0
+  const remaining = Math.max(0, endurance - onStation)
+  const pct = endurance > 0 ? Math.min(100, Math.round((onStation / endurance) * 100)) : 0
+  const bingo = remaining < endurance * 0.15
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] tracking-widest text-mute mb-1.5 font-mono">SORTIE</div>
+      <div className="border border-line rounded-sm px-2 py-1.5 space-y-1 font-mono">
+        <div className="flex items-baseline justify-between gap-2 text-[11px]">
+          <span className="text-mute text-[9px] tracking-widest">ENDURANCE</span>
+          <span className="text-fg">{endurance}<span className="text-mute ml-1 text-[9px]">min</span></span>
+        </div>
+        <div className="flex items-baseline justify-between gap-2 text-[11px]">
+          <span className="text-mute text-[9px] tracking-widest">ON STATION</span>
+          <span className="text-fg">
+            {onStation}<span className="text-mute ml-1 text-[9px]">min</span>
+            <span className="text-mute ml-2 text-[9px]">({pct}%)</span>
+          </span>
+        </div>
+        <div className="flex items-baseline justify-between gap-2 text-[11px]">
+          <span className="text-mute text-[9px] tracking-widest">STATUS</span>
+          <span className={bingo ? 'text-red font-semibold' : 'text-green'}>
+            {bingo ? 'BINGO FUEL' : 'NOMINAL'}
+          </span>
+        </div>
+        {unit.home_base_id && (
+          <div className="flex items-baseline justify-between gap-2 text-[11px]">
+            <span className="text-mute text-[9px] tracking-widest">HOME</span>
+            <span className="text-fg text-[10px] truncate">{unit.home_base_id}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function SensorList({
   unitId, sensors, canCommand,

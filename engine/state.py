@@ -12,6 +12,32 @@ from pydantic import BaseModel, Field
 from engine.terrain import Terrain
 
 
+# ---------------------------------------------------------------------------
+# OPLAN — briefing, phased objectives. Optional/defaulted so back-compat holds.
+# ---------------------------------------------------------------------------
+
+class Objective(BaseModel):
+    label: str
+    kind: Literal["destroy", "hold", "transit", "deny", "recon"] = "destroy"
+    target_ids: list[str] = Field(default_factory=list)
+    target_hex: Optional[tuple[int, int]] = None
+    completed: bool = False
+
+
+class OpPhase(BaseModel):
+    name: str
+    description: str = ""
+    objectives: list[Objective] = Field(default_factory=list)
+    completed: bool = False
+
+
+class Briefing(BaseModel):
+    title: str = ""
+    situation: str = ""
+    mission: str = ""
+    rules_of_engagement: str = ""
+
+
 Side = Literal["blue", "red"]
 
 
@@ -71,6 +97,12 @@ class UnitInstance(BaseModel):
     stealth: bool = False
     sensors: list[SensorRef] = Field(default_factory=list)
     weapons: list[WeaponRef] = Field(default_factory=list)
+    # Sortie / endurance tracking. 0 endurance = no logistics tracked
+    # (ground/sea units). Air units count time_in_air_minutes up toward
+    # endurance_minutes; when the remainder gets tight they must RTB.
+    endurance_minutes: int = 0
+    time_in_air_minutes: int = 0
+    home_base_id: Optional[str] = None
 
 
 class BaseInstance(BaseModel):
@@ -181,6 +213,15 @@ class GameState(BaseModel):
     # in progress.
     winner: Optional[str] = None       # "blue" | "red" | "draw" | None
     win_reason: Optional[str] = None   # "hp_collapse" | "turn_cap" | "annihilation"
+    # Sim-clock in minutes since scenario start. Each resolve_turn advances
+    # by `minutes_per_turn` (default 30). The HUD renders this as
+    # "D+0 14:32" so the player has a real sense of operational tempo.
+    sim_clock_minutes: int = 0
+    minutes_per_turn: int = 30
+    # OPLAN — optional briefing + phased objectives. None / [] = legacy scenarios.
+    briefing: Optional[Briefing] = None
+    phases: list[OpPhase] = Field(default_factory=list)
+    current_phase: int = 0
     # Per-side fused intelligence picture. Each side's list contains one Contact
     # per enemy entity that side has observed (now or recently). Recomputed by
     # engine.sensing after every resolve_turn.

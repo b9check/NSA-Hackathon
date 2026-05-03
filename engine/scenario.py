@@ -10,9 +10,12 @@ from engine.catalog.bases import Base
 from engine.catalog.platforms import Platform
 from engine.state import (
     BaseInstance,
+    Briefing,
     GameState,
     HexCell,
     MapInfo,
+    Objective,
+    OpPhase,
     SensorRef,
     UnitInstance,
     VictoryConfig,
@@ -59,11 +62,36 @@ def _weapon_refs(keys: tuple[str, ...]) -> list[WeaponRef]:
     return out
 
 
-def _platform_to_unit(u: dict, p: Platform) -> UnitInstance:
+def _hex_dist(ac: int, ar: int, bc: int, br: int) -> int:
+    """Offset (odd-r) hex distance — matches the frontend's toCube formula."""
+    ax = ac - (ar - (ar & 1)) // 2
+    az = ar
+    ay = -ax - az
+    bx = bc - (br - (br & 1)) // 2
+    bz = br
+    by = -bx - bz
+    return (abs(ax - bx) + abs(ay - by) + abs(az - bz)) // 2
+
+
+def _nearest_friendly_base_id(
+    side: str, col: int, row: int, bases: list[BaseInstance]
+) -> str | None:
+    candidates = [b for b in bases if b.side == side]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda b: _hex_dist(col, row, b.col, b.row)).id
+
+
+def _platform_to_unit(
+    u: dict, p: Platform, friendly_bases: list[BaseInstance] | None = None,
+) -> UnitInstance:
     col, row = u["pos"]
     sensors = _sensor_refs(p.sensors)
     weapons = _weapon_refs(p.weapons)
     side = u["side"]
+    home_base_id: str | None = None
+    if p.endurance_minutes > 0 and friendly_bases is not None:
+        home_base_id = _nearest_friendly_base_id(side, int(col), int(row), friendly_bases)
     return UnitInstance(
         id=u["id"],
         type=p.key,
@@ -83,6 +111,9 @@ def _platform_to_unit(u: dict, p: Platform) -> UnitInstance:
         stealth=p.stealth,
         sensors=sensors,
         weapons=weapons,
+        endurance_minutes=p.endurance_minutes,
+        time_in_air_minutes=0,
+        home_base_id=home_base_id,
     )
 
 
@@ -145,19 +176,19 @@ def load_scenario(path: str | Path) -> GameState:
 
     map_info = MapInfo(cols=cols, rows=rows, cells=cells)
 
-    unit_instances: list[UnitInstance] = []
-    for u in raw.get("units", []):
-        ptype = PLATFORMS.get(u["type"])
-        if ptype is None:
-            raise KeyError(f"unknown platform {u['type']!r}")
-        unit_instances.append(_platform_to_unit(u, ptype))
-
     base_instances: list[BaseInstance] = []
     for b in raw.get("bases", []):
         btype = BASES.get(b["type"])
         if btype is None:
             raise KeyError(f"unknown base {b['type']!r}")
         base_instances.append(_base_to_instance(b, btype))
+
+    unit_instances: list[UnitInstance] = []
+    for u in raw.get("units", []):
+        ptype = PLATFORMS.get(u["type"])
+        if ptype is None:
+            raise KeyError(f"unknown platform {u['type']!r}")
+        unit_instances.append(_platform_to_unit(u, ptype, base_instances))
 
     victory = VictoryConfig(**raw.get("victory", {}))
 
@@ -170,6 +201,37 @@ def load_scenario(path: str | Path) -> GameState:
         starting_total[b.side] += 50.0  # bases worth 50 each (matches resolver)
         starting_hp[b.side] += b.max_hp
 
+    # Parse optional OPLAN briefing + phases
+    briefing = None
+    if raw.get("briefing"):
+        b = raw["briefing"]
+        briefing = Briefing(
+            title=b.get("title", ""),
+            situation=b.get("situation", ""),
+            mission=b.get("mission", ""),
+            rules_of_engagement=b.get("rules_of_engagement", b.get("roe", "")),
+        )
+    phases: list[OpPhase] = []
+    for ph in raw.get("phases", []) or []:
+        objs: list[Objective] = []
+        for o in ph.get("objectives", []) or []:
+            th = o.get("target_hex")
+            if th is not None:
+                th = (int(th[0]), int(th[1]))
+            objs.append(Objective(
+                label=o.get("label", ""),
+                kind=o.get("kind", "destroy"),
+                target_ids=list(o.get("target_ids", []) or []),
+                target_hex=th,
+                completed=bool(o.get("completed", False)),
+            ))
+        phases.append(OpPhase(
+            name=ph.get("name", ""),
+            description=ph.get("description", ""),
+            objectives=objs,
+            completed=bool(ph.get("completed", False)),
+        ))
+
     state = GameState(
         name=raw["name"],
         seed=int(raw.get("seed", 42)),
@@ -181,6 +243,9 @@ def load_scenario(path: str | Path) -> GameState:
         victory=victory,
         starting_total=starting_total,
         starting_hp=starting_hp,
+        briefing=briefing,
+        phases=phases,
+        current_phase=0,
     )
     # Seed the initial intel picture from each side's starting sensor coverage.
     from engine.sensing import update_contacts

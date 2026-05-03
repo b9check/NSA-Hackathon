@@ -61,6 +61,9 @@ export interface UnitInstance {
   stealth: boolean
   sensors: SensorRef[]
   weapons: WeaponRef[]
+  endurance_minutes?: number
+  time_in_air_minutes?: number
+  home_base_id?: string | null
 }
 
 export interface BaseInstance {
@@ -89,6 +92,31 @@ export interface VictoryConfig {
 }
 
 export type WinReason = 'hp_collapse' | 'turn_cap' | 'annihilation'
+
+// ---- OPLAN: briefing + phased objectives ----
+export type ObjectiveKind = 'destroy' | 'hold' | 'transit' | 'deny' | 'recon'
+
+export interface Objective {
+  label: string
+  kind: ObjectiveKind
+  target_ids: string[]
+  target_hex?: [number, number] | null
+  completed: boolean
+}
+
+export interface OpPhase {
+  name: string
+  description: string
+  objectives: Objective[]
+  completed: boolean
+}
+
+export interface Briefing {
+  title: string
+  situation: string
+  mission: string
+  rules_of_engagement: string
+}
 
 export interface Mission {
   unit_id: string
@@ -131,6 +159,11 @@ export interface GameState {
   win_reason?: WinReason | null
   contacts?: { blue: Contact[]; red: Contact[] }
   missions?: Record<string, Mission>
+  sim_clock_minutes?: number
+  minutes_per_turn?: number
+  briefing?: Briefing | null
+  phases?: OpPhase[]
+  current_phase?: number
 }
 
 

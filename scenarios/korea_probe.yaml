@@ -1,0 +1,87 @@
+name: "Korea Probe"
+seed: 220511
+turn_limit: 30
+
+briefing:
+  title: "DMZ PROBE — DEFENSIVE ACTION"
+  situation: |
+    Reconnaissance assets have identified a hostile probe force massing north
+    of the DMZ at Kaesong. Intent appears to be a limited-objective
+    reconnaissance-in-force aimed at the FLOT (forward line of own troops)
+    near Munsan. Civilian population centers lie 22km south of the FLOT.
+    Allied early warning radars are degraded after a SIGINT incident last
+    week; ground picket assets must compensate.
+  mission: |
+    On order, ROK/US combined forces will establish a defensive picket
+    forward of Phase Line ALPHA, identify hostile intent, and intercept any
+    breaching elements before they threaten civilian areas. Hold until
+    reinforcements arrive at turn 15.
+  rules_of_engagement: |
+    Defensive only. No fires across the MDL. Engage only on positive ID of
+    hostile intent (weapons free upon crossing of Phase Line ALPHA, or upon
+    being engaged). All engagements must be reported within 10 minutes.
+
+phases:
+  - name: "Phase I: Detect"
+    description: "Establish radar coverage and identify the probe force composition."
+    objectives:
+      - { label: "Activate forward radar picket", kind: "recon" }
+      - { label: "Identify probe force lead element", kind: "recon", target_ids: ["red-scout_drone-1"] }
+  - name: "Phase II: Intercept"
+    description: "Engage hostile elements before they cross Phase Line ALPHA."
+    objectives:
+      - { label: "Deny crossing at Phase Line ALPHA", kind: "deny", target_hex: [10, 7] }
+      - { label: "Destroy probe lead armor", kind: "destroy", target_ids: ["red-armor-1"] }
+      - { label: "Destroy probe infantry", kind: "destroy", target_ids: ["red-infantry-1", "red-infantry-2"] }
+  - name: "Phase III: Hold"
+    description: "Defend friendly base until reinforcements arrive (turn 15)."
+    objectives:
+      - { label: "Hold blue base until turn 15", kind: "hold", target_ids: ["blue-base-1"] }
+
+map:
+  cols: 20
+  rows: 15
+  terrain: |
+    OOOMFPMMFFPPOOOOOOOO
+    OOOOFFPPPPPPOOOOOOOO
+    OOOOOOFPFPFOOOOOOOOO
+    OOOOOOOPPMOOOOOOOOOO
+    OOOOOOOFFFFOOOOOOOOO
+    OOOOOOOOOPOOOOOOOOOO
+    OOOOOOOOOOOOOOOOOOOO
+    OOOOOOOOOOOOOOOOOOOO
+    OOOOOOOOOOOOOOOOOOOO
+    OOOOOOOOOOOOOPOOOOOO
+    OOOOOOOOOOOOOOOOOOOO
+    OOOOOOOOMPFFOPFPOOOO
+    OOOOOOOOOMPFFOOPOPOO
+    OOOOOOOOPFFFFPPOOOOO
+    OOOOOOOOOMFFFPMMOOOO
+
+victory:
+  hp_loss_threshold: 0.25
+  turn_cap: 20
+
+units:
+  - { id: blue-destroyer-1        , side: blue , type: destroyer         , pos: [ 8,  8] }
+  - { id: blue-fighter-1          , side: blue , type: fighter           , pos: [10, 14] }
+  - { id: blue-bomber-1           , side: blue , type: bomber            , pos: [ 2, 14] }
+  - { id: blue-scout_drone-1      , side: blue , type: scout_drone       , pos: [ 5, 11] }
+  - { id: blue-missile_launcher-1 , side: blue , type: missile_launcher  , pos: [13,  9] }
+  - { id: blue-armor-1            , side: blue , type: armor             , pos: [13, 14] }
+  - { id: blue-infantry-1         , side: blue , type: infantry          , pos: [11, 11] }
+  - { id: blue-infantry-2         , side: blue , type: infantry          , pos: [10, 13] }
+  - { id: blue-strike_drone-1     , side: blue , type: strike_drone      , pos: [10, 12] }
+  - { id: red-destroyer-1         , side: red  , type: destroyer         , pos: [18,  3] }
+  - { id: red-fighter-1           , side: red  , type: fighter           , pos: [12,  0] }
+  - { id: red-bomber-1            , side: red  , type: bomber            , pos: [ 0,  1] }
+  - { id: red-scout_drone-1       , side: red  , type: scout_drone       , pos: [12,  4] }
+  - { id: red-missile_launcher-1  , side: red  , type: missile_launcher  , pos: [ 9,  5] }
+  - { id: red-armor-1             , side: red  , type: armor             , pos: [10,  0] }
+  - { id: red-infantry-1          , side: red  , type: infantry          , pos: [ 6,  2] }
+  - { id: red-infantry-2          , side: red  , type: infantry          , pos: [ 7,  2] }
+  - { id: red-strike_drone-1      , side: red  , type: strike_drone      , pos: [ 9,  2] }
+
+bases:
+  - { id: blue-base-1             , side: blue , type: base              , pos: [17, 12] }
+  - { id: red-base-1              , side: red  , type: base              , pos: [11,  1] }

@@ -45,6 +45,14 @@ interface AppState {
   pendingOrders: Record<string, Order> // keyed by unit_id
   targeting: TargetingMode | null
   resolving: boolean
+  // Continuous-time sim controls. `playing` is the user-set intent;
+  // the loop checks this between ticks to decide whether to schedule
+  // another. `simSpeed` scales animation timings (1× = real-time
+  // animations; 60× = near-instant). `lastPauseReason` is shown in the
+  // bottom bar when the loop auto-pauses.
+  playing: boolean
+  simSpeed: number          // 1 | 5 | 15 | 60
+  lastPauseReason: string | null
   /** Set immediately after /api/resolve returns. MapStage subscribes,
    *  animates each event in order, then clears + refetches state.json. */
   pendingEvents: any[] | null
@@ -89,6 +97,11 @@ interface AppState {
    *  and halt flags). Otherwise creates a new mission with sensible defaults. */
   commitMissionTarget: (unitId: string, hex: [number, number]) => Promise<void>
   runUntilHalt: (maxTurns?: number) => Promise<{ halts: Array<{unit_id: string; reason: string}>; turnsRun: number }>
+
+  // Continuous-time controls
+  play: () => Promise<void>
+  pause: (reason?: string) => void
+  setSpeed: (s: number) => void
 
   // ---- Turn flow -------------------------------------------------
   /** Pull the latest turn meta (scores, locks, counts) from /api/turn. */
@@ -160,6 +173,9 @@ export const useStore = create<AppState>((set, get) => ({
   pendingEvents: null,
   replaying: false,
   hotseatReplay: null,
+  playing: false,
+  simSpeed: 30,            // start at 30× — feels like an op center, not real-time
+  lastPauseReason: null,
   gameOver: null,
   eventLog: [],
 
@@ -299,8 +315,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   runUntilHalt: async (maxTurns = 8) => {
-    // Snapshot start-turn for event annotation (so the battle log gets
-    // turn-stamped entries even though we played multiple turns at once).
+    // Legacy single-shot run. Kept for back-compat; the primary flow is
+    // now play() which loops one tick at a time.
     const startTurn = get().game?.turn ?? 0
     const r: any = await fetchJson('/api/run', {
       method: 'POST',
@@ -308,12 +324,6 @@ export const useStore = create<AppState>((set, get) => ({
       body: JSON.stringify({ max_turns: maxTurns }),
     })
     const events = (r?.events ?? []) as any[]
-    // Pipe events through the existing replay pipeline. MapStage subscribes
-    // to `pendingEvents` and animates each one against the CURRENT game
-    // state (which is still the pre-run snapshot — we deliberately don't
-    // refetch yet). When the animator finishes, onReplayComplete fires and
-    // pulls the post-run state.json (which has the new positions, HP,
-    // contacts, etc).
     const seqBase = get().eventLog.length
     const annotated: AnnotatedEvent[] = events.map(
       (e: any, i: number) => ({ ...e, _turn: startTurn, _seq: seqBase + i }),
@@ -326,6 +336,139 @@ export const useStore = create<AppState>((set, get) => ({
       selectedUnitId: null,
     })
     return { halts: r.halts ?? [], turnsRun: r.turns_run ?? 0 }
+  },
+
+  // ---- Continuous-time controls ----
+  setSpeed: (s) => set({ simSpeed: Math.max(1, Math.min(60, s)) }),
+  pause: (reason) => set({ playing: false, lastPauseReason: reason ?? null }),
+  play: async () => {
+    if (get().playing) return    // already in a play loop
+    set({ playing: true, lastPauseReason: null, selectedUnitId: null, targeting: null })
+
+    const SIGNIFICANT_AUTO_PAUSE = (events: any[], mySide: 'blue' | 'red'): string | null => {
+      // Returns a non-null reason string if the events warrant a halt.
+      for (const e of events) {
+        if (!e || !e.type) continue
+        if (e.type === 'destroyed') {
+          if (e.side === mySide) return `friendly destroyed: ${e.entity_id ?? '?'}`
+          // Don't auto-pause on enemy destruction — that's good news, keep going.
+        }
+        if (e.type === 'strike') {
+          // Strikes against your forces: pause. But only if any of the targets
+          // hit are friendly (server doesn't tell us directly; check by id prefix).
+          for (const tid of e.targets_hit ?? []) {
+            if (typeof tid === 'string' && tid.startsWith(`${mySide}-`)) {
+              return `friendly under fire: ${tid}`
+            }
+          }
+        }
+      }
+      return null
+    }
+
+    while (get().playing) {
+      // Wait if a replay is still flushing (animation pipeline busy).
+      if (get().replaying || get().pendingEvents != null) {
+        await new Promise((r) => setTimeout(r, 50))
+        continue
+      }
+      // No missions = nothing to do — pause politely.
+      const game = get().game
+      if (!game) {
+        get().pause('no game state')
+        return
+      }
+      if (!game.missions || Object.keys(game.missions).length === 0) {
+        get().pause('no missions set')
+        return
+      }
+      if (game.winner) {
+        get().pause('game over')
+        return
+      }
+
+      // Capture pre-tick contact ids per side so we can detect "first contact"
+      // after the tick even if the engine missed a halt-on-contact.
+      const preContacts = {
+        blue: new Set((game.contacts?.blue ?? []).map((c) => c.contact_id)),
+        red: new Set((game.contacts?.red ?? []).map((c) => c.contact_id)),
+      }
+
+      let r: any
+      try {
+        r = await fetchJson('/api/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ max_turns: 1 }),
+        })
+      } catch (err: any) {
+        get().pause(`error: ${err?.message ?? err}`)
+        return
+      }
+
+      const events = (r?.events ?? []) as any[]
+      const halts = r?.halts ?? []
+      const startTurn = game.turn
+
+      // Pipe events through the replay pipeline so animations play.
+      const seqBase = get().eventLog.length
+      const annotated: AnnotatedEvent[] = events.map(
+        (e: any, i: number) => ({ ...e, _turn: startTurn, _seq: seqBase + i }),
+      )
+      set({
+        pendingEvents: events,
+        pendingOrders: {},
+        eventLog: [...get().eventLog, ...annotated].slice(-200),
+      })
+
+      // Wait for the animation to flush. The replay subscriber in MapStage
+      // calls onReplayComplete which clears pendingEvents and refetches state.
+      // Poll until that happens.
+      while (get().pendingEvents != null || get().replaying) {
+        await new Promise((r) => setTimeout(r, 30))
+        if (!get().playing) return
+      }
+
+      // Re-fetch was triggered by onReplayComplete; ensure we have fresh state.
+      // Auto-pause checks:
+      const myView = get().viewMode
+      const mySide: 'blue' | 'red' = myView === 'red' ? 'red' : 'blue'
+
+      // 1) Halt fired (engine-level halt)
+      if (halts.length > 0) {
+        const top = halts[0]
+        get().pause(`halt: ${top.unit_id} (${top.reason})`)
+        return
+      }
+      // 2) Significant event in this tick (friendly damage / destruction)
+      const evReason = SIGNIFICANT_AUTO_PAUSE(events, mySide)
+      if (evReason) {
+        get().pause(evReason)
+        return
+      }
+      // 3) New contact for player's side (intel surprise)
+      const newGame = get().game
+      if (newGame) {
+        const postContacts = new Set(
+          (newGame.contacts?.[mySide] ?? []).map((c: any) => c.contact_id),
+        )
+        for (const cid of postContacts) {
+          if (!preContacts[mySide].has(cid)) {
+            get().pause(`new contact: ${cid}`)
+            return
+          }
+        }
+      }
+      // 4) Game over — stop on next iteration's check.
+      // Otherwise: continue loop, take next tick. simSpeed controls cadence
+      // by spacing the loop iterations. At 60×, no extra delay (animations
+      // are the bottleneck). At 1×, one tick per ~30 sim-minutes wall-time.
+      const speed = get().simSpeed
+      // 30 sim-min/turn ÷ speed × ms/sec ≈ delay between starts of each tick.
+      // Practical floor of ~50ms so 60× doesn't pegasus the server.
+      const delayMs = Math.max(50, Math.round((30 * 60_000) / Math.max(1, speed)))
+      await new Promise((r) => setTimeout(r, delayMs))
+    }
   },
 
   refetchTurn: async () => {

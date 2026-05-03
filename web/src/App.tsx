@@ -4,6 +4,8 @@ import { MapStage } from './components/MapStage'
 import { TopBar, RightRail } from './components/HUD'
 import { TurnBar } from './components/TurnBar'
 import { EndGameOverlay } from './components/EndGameOverlay'
+import { Briefing } from './components/Briefing'
+import { ObjectivesPanel } from './components/ObjectivesPanel'
 
 
 /** Watch the engine-authoritative game.winner field and surface the
@@ -93,6 +95,8 @@ export default function App() {
         {swapping && <SwapOverlay />}
         <EndGameOverlay />
       </div>
+      {game && <ObjectivesPanel />}
+      {game && <Briefing />}
     </div>
   )
 }

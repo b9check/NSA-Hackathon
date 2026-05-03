@@ -10,6 +10,7 @@ import type { BaseInstance, Side, UnitInstance } from '../types'
 import { COLORS, SIDE_COLOR, SIDE_DIM } from '../theme'
 import { HEX_SIZE, hexToPixel } from '../hex'
 import { getIcon } from './icons'
+import { drawFrame, drawFunctionGlyph } from './symbols'
 
 
 // Sprite size for unit icons (FlightRadar-ish small silhouettes).
@@ -78,17 +79,10 @@ function drawHpBar(g: Graphics, hp: number, maxHp: number, side: Side) {
 
 function drawUnitShape(g: Graphics, unit: UnitInstance) {
   g.clear()
-  const color = SIDE_COLOR[unit.side]
   const r = HEX_SIZE * 0.55
-  if (unit.side === 'blue') {
-    g.roundRect(-r, -r * 0.7, r * 2, r * 1.4, 5)
-      .fill({ color: COLORS.bg, alpha: 0.85 })
-      .stroke({ color, width: 2 })
-  } else {
-    g.poly([0, -r, r, 0, 0, r, -r, 0])
-      .fill({ color: COLORS.bg, alpha: 0.85 })
-      .stroke({ color, width: 2 })
-  }
+  // MIL-STD-2525-style: affiliation frame + function-modifier glyph.
+  drawFrame(g, unit.side, r)
+  drawFunctionGlyph(g, unit.type, unit.side, r)
   if (unit.stealth) {
     g.circle(r * 0.85, -r * 0.6, 2.4).fill(COLORS.fg)
   }
@@ -98,15 +92,14 @@ function drawBaseShape(g: Graphics, base: BaseInstance) {
   g.clear()
   const color = SIDE_DIM[base.side]
   const r = HEX_SIZE * 0.62
-  g.poly([
-    -r,         r * 0.55,
-    r,          r * 0.55,
-    r,          -r * 0.15,
-    0,          -r * 0.65,
-    -r,         -r * 0.15,
-  ])
-    .fill({ color: COLORS.bg, alpha: 0.85 })
-    .stroke({ color, width: 2 })
+  // Installation symbol: affiliation frame with a small flag-staff bar
+  // through the top — distinguishes a base from a mobile unit.
+  drawFrame(g, base.side, r * 0.85)
+  // Flag staff (thin vertical bar rising from the frame).
+  g.moveTo(0, -r * 0.6).lineTo(0, -r * 1.05).stroke({ color, width: 1.5 })
+  g.rect(-r * 0.35, -r * 1.05, r * 0.7, r * 0.18)
+    .fill({ color, alpha: 0.85 })
+    .stroke({ color, width: 1 })
 }
 
 export function createUnitNode(unit: UnitInstance): UnitNode {

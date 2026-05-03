@@ -14,6 +14,9 @@ dist/
 .vite/
 sensor_pipeline/frontend/build/
 sensor_pipeline/frontend/.cache/
+# tsc-emitted JS siblings of the .ts/.tsx source tree
+web/src/**/*.js
+web/src/*.js
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -48,3 +51,4 @@ Thumbs.db
 
 # Brian accidentally committed his __pycache__; ignore for future
 sensor_pipeline/backend/__pycache__/
+tsconfig.tsbuildinfo

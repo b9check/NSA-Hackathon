@@ -376,6 +376,9 @@ def _phase_update(
     blue_s, red_s = compute_scores(state)
     events.append(TurnEndEvent(turn=turn, blue_score=blue_s, red_score=red_s))
     state.turn = turn + 1
+    # Advance sim clock — each turn represents `minutes_per_turn` of
+    # simulated time. Used by the HUD's D+H:MM display.
+    state.sim_clock_minutes = state.sim_clock_minutes + state.minutes_per_turn
 
     # Recompute per-side fused intel picture from current sensor coverage.
     # Done after move/strike/death so contacts reflect end-of-turn truth
