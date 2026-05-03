@@ -32,6 +32,9 @@ every controllable unit.
 deterministic damage, hits every enemy on target hex); 4) UPDATE (cleanup, win check).
 - Win conditions (priority): annihilation; HP collapse (≤25% of starting HP); \
 turn cap = higher HP%.
+- BASES are always visible on the map — they don't move and have heavy HP. \
+The enemy base is your primary objective once enemy units are mostly cleared. \
+Don't camp in your half after winning attrition; advance and strike the base.
 
 # Unit catalog (all 9 types)
 
@@ -82,10 +85,12 @@ missile_launchers and bases are stationary; strike_drones die on fire.
 
 def render_state(state: GameState, side: str) -> str:
     """Compact state render: ASCII map + own units + visible enemies +
-    recent events. ~1000-1500 tokens."""
+    bases + objectives + recent events. ~1500-2000 tokens."""
     map_block = _render_ascii_map(state, side)
     own_block = _render_own_units(state, side)
     enemy_block = _render_visible_enemies(state, side)
+    bases_block = _render_bases(state, side)
+    objectives_block = _render_objectives(state, side)
     return f"""## TURN {state.turn + 1} of {state.victory.turn_cap} — {side.upper()} TO MOVE
 
 starting HP: blue {state.starting_hp.get('blue', 0)} / red {state.starting_hp.get('red', 0)}
@@ -99,6 +104,12 @@ hp_loss_threshold: {state.victory.hp_loss_threshold}
 
 ## Visible enemies (hexes within your sensor coverage)
 {enemy_block}
+
+## Bases (always visible — terrain landmarks)
+{bases_block}
+
+## Objectives this turn
+{objectives_block}
 """
 
 
@@ -219,13 +230,20 @@ def _render_ascii_map(state: GameState, side: str) -> str:
         code = f"{enemy_side[0].lower()}{i+1}"
         overlay[(e.col, e.row)] = code
         legend_lines.append(f"  {code} = {e.id} ({e.type}, position seen)")
-    # Bases
+    # Bases — ALWAYS visible per UNITS_AND_RULES.md ("map terrain and
+    # bases always visible"). Without this the AI never sees the enemy
+    # base and wanders off after clearing units.
     for b in state.bases or []:
         code = f"{b.side[0].upper()}b" if b.side == side else f"{b.side[0].lower()}b"
-        if b.side == side or _seen_by_side(state, side, b):
-            overlay[(b.col, b.row)] = code
+        overlay[(b.col, b.row)] = code
+        # HP is only revealed for own bases; enemy base HP is generic.
+        if b.side == side:
             legend_lines.append(
-                f"  {code} = {b.id} ({'your' if b.side == side else 'enemy'} base, hp {b.hp}/{b.max_hp})"
+                f"  {code} = {b.id} (YOUR base, hp {b.hp}/{b.max_hp})"
+            )
+        else:
+            legend_lines.append(
+                f"  {code} = {b.id} (ENEMY base, hp {b.hp}/{b.max_hp}) — primary objective"
             )
 
     # Render rows. Odd-r offset → indent odd rows by 1 cell width.
@@ -287,3 +305,68 @@ def _render_visible_enemies(state: GameState, side: str) -> str:
             f"{e.id:<28} {e.type:<17} ({e.col:>2},{e.row:>2})  {e.hp}/{e.max_hp:<3} {e.domain}"
         )
     return "\n".join(rows)
+
+
+def _render_bases(state: GameState, side: str) -> str:
+    """List ALL bases (own + enemy). Bases are always visible per the
+    rules — they're map landmarks, not units to hide. The enemy base is
+    the AI's primary objective once enemy units are mostly cleared."""
+    if not state.bases:
+        return "  (no bases on this map)"
+    rows = [f"{'id':<22} {'side':<8} pos       hp     role"]
+    for b in state.bases:
+        owner = "YOURS" if b.side == side else "ENEMY"
+        role = "primary target" if b.side != side else "defend"
+        rows.append(
+            f"{b.id:<22} {owner:<8} ({b.col:>2},{b.row:>2})  {b.hp}/{b.max_hp:<3} {role}"
+        )
+    return "\n".join(rows)
+
+
+def _render_objectives(state: GameState, side: str) -> str:
+    """Plain-English summary of paths to victory + remaining work, so the
+    LLM doesn't lose the plot after clearing units."""
+    enemy_side = "red" if side == "blue" else "blue"
+    enemy_units_alive = [u for u in state.units if u.side == enemy_side]
+    enemy_bases_alive = [b for b in (state.bases or []) if b.side == enemy_side]
+    own_hp_total = (
+        sum(u.hp for u in state.units if u.side == side)
+        + sum(b.hp for b in (state.bases or []) if b.side == side)
+    )
+    enemy_hp_total = (
+        sum(u.hp for u in state.units if u.side == enemy_side)
+        + sum(b.hp for b in (state.bases or []) if b.side == enemy_side)
+    )
+    own_start = state.starting_hp.get(side, 1) or 1
+    enemy_start = state.starting_hp.get(enemy_side, 1) or 1
+    own_pct = 100 * own_hp_total / own_start
+    enemy_pct = 100 * enemy_hp_total / enemy_start
+    threshold_pct = int(state.victory.hp_loss_threshold * 100)
+    turns_left = max(0, state.victory.turn_cap - state.turn)
+
+    parts: List[str] = []
+    parts.append(
+        f"You are {side.upper()} and win when ANY of:\n"
+        f"  - all enemy units AND bases destroyed (annihilation)\n"
+        f"  - enemy total HP drops to ≤{threshold_pct}% of starting (HP collapse)\n"
+        f"  - higher HP%% than enemy at turn {state.victory.turn_cap}"
+    )
+    parts.append("")
+    parts.append(
+        f"Score now: YOU {own_pct:.0f}% HP / ENEMY {enemy_pct:.0f}% HP "
+        f"(threshold {threshold_pct}%) — {turns_left} turn(s) remaining"
+    )
+    parts.append(
+        f"Remaining enemy: {len(enemy_units_alive)} unit(s) + "
+        f"{len(enemy_bases_alive)} base(s)"
+    )
+    if not enemy_units_alive and enemy_bases_alive:
+        parts.append(
+            f"⚠ Enemy units cleared but base(s) still standing. PUSH TO THE "
+            f"ENEMY BASE — strike it to win by annihilation."
+        )
+    elif len(enemy_units_alive) <= 2 and enemy_bases_alive:
+        parts.append(
+            f"⚠ Enemy nearly cleared. After mopping up, advance on enemy base."
+        )
+    return "\n".join(parts)
