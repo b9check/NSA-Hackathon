@@ -302,7 +302,6 @@ export const useStore = create<AppState>((set, get) => ({
       )
       const baseState = get().game
       const realGame = get().realGame
-      console.log('[hotseat] resolveTurn API done. realGame:', realGame, 'events:', events.length)
       if (realGame && baseState) {
         // Hot-seat: animate twice — once from BLUE POV, once from RED.
         // Snapshot the pre-resolve state so each pass starts from the
@@ -355,7 +354,6 @@ export const useStore = create<AppState>((set, get) => ({
 
   onReplayComplete: () => {
     const hr = get().hotseatReplay
-    console.log('[hotseat] onReplayComplete fired, phase:', hr?.phase ?? 'none')
     if (!hr) {
       // Normal flow: clear and refetch.
       set({ pendingEvents: null, replaying: false })
@@ -365,7 +363,6 @@ export const useStore = create<AppState>((set, get) => ({
     if (hr.phase === 'blue') {
       // Pass 1 done — start RED pass from the same snapshot.
       const fresh = JSON.parse(JSON.stringify(hr.snapshot))
-      console.log('[hotseat] starting RED pass, events:', hr.events.length)
       set({
         replaying: false,
         viewMode: 'red',
@@ -375,7 +372,6 @@ export const useStore = create<AppState>((set, get) => ({
       })
     } else if (hr.phase === 'red') {
       // Pass 2 done — refetch resolver truth and settle on BLUE.
-      console.log('[hotseat] both passes done, settling to BLUE')
       set({
         replaying: false,
         pendingEvents: null,

@@ -880,14 +880,21 @@ export function MapStage() {
   const setOrder = useStore((s) => s.setOrder)
   const cancelTargeting = useStore((s) => s.cancelTargeting)
 
-  // mount once when game first loads
+  // Mount Pixi ONCE per MapStage instance. We deliberately don't depend
+  // on `game` here — depending on it would tear down + rebuild Pixi
+  // every time game changes (e.g. each pass of the hot-seat 2-POV
+  // replay, which swaps game between snapshots). MapStage already
+  // remounts on assetVersion changes via key={assetVersion} in App, so
+  // region swaps / regens still rebuild Pixi correctly.
   useEffect(() => {
-    if (!game || !ref.current || handlesRef.current) return
+    if (!ref.current) return
+    const initialGame = useStore.getState().game
+    if (!initialGame) return
     let cancelled = false
     ;(async () => {
       const h = await buildPixi(
         ref.current!,
-        game,
+        initialGame,
         (hex, unit) => {
           // If targeting mode is active, the next click commits the order.
           const st = useStore.getState()
@@ -925,7 +932,7 @@ export function MapStage() {
       handlesRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game])
+  }, [])
 
   // redraw on selection / state / view-mode change OR pending-order change.
   const pendingOrdersHash = useStore((s) => JSON.stringify(s.pendingOrders))
@@ -939,20 +946,14 @@ export function MapStage() {
   // Replay any events queued by /api/resolve.
   const pendingEvents = useStore((s) => s.pendingEvents)
   useEffect(() => {
-    console.log('[hotseat] pendingEvents effect, len:', pendingEvents?.length, 'has handles:', !!handlesRef.current, 'has game:', !!game)
     if (!pendingEvents || !handlesRef.current || !game) return
     let cancelled = false
     ;(async () => {
       useStore.getState().setReplaying(true)
-      console.log('[hotseat] playEvents starting, events:', pendingEvents.length)
       try {
         await handlesRef.current!.playEvents(pendingEvents, game)
-        console.log('[hotseat] playEvents finished')
       } finally {
-        if (cancelled) {
-          console.log('[hotseat] playEvents cancelled, skipping onReplayComplete')
-          return
-        }
+        if (cancelled) return
         // The store decides what comes next: in hot-seat mode it
         // orchestrates a 2nd POV pass; otherwise it refetches and
         // settles. This keeps replay-completion logic in one place.
