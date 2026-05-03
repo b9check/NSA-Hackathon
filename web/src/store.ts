@@ -62,6 +62,17 @@ interface AppState {
 
   gameOver: GameOverInfo | null
 
+  /** Per-side AI controller. 'manual' = humans drive the UI; any other
+   *  value names a registered server-side controller (random / heuristic /
+   *  llm). The server owns the truth; we mirror it locally for fast UI. */
+  controllers: { blue: ControllerKind; red: ControllerKind }
+  /** Last completed AI turn's reasoning per side, fetched after /api/ai/play
+   *  returns. Drives the ReasoningPanel. */
+  aiReasoning: { blue: AIReasoning | null; red: AIReasoning | null }
+  /** Set while an AI side is actively producing orders, so UI can show a
+   *  "thinking…" badge and the click-handler can bail. */
+  aiThinking: { blue: boolean; red: boolean }
+
   // Battle narrative — full event history, prefixed with the turn each
   // event was emitted on. Capped at 5000 so a 30-turn match keeps every
   // event from turn 1 onward (player can scroll back to game start).
@@ -81,6 +92,11 @@ interface AppState {
   /** Free action — flip a unit's radar ON/OFF, then refetch state.
    *  Doesn't consume a turn order; persists immediately on the server. */
   toggleSensor: (unitId: string, sensorKey: string, active: boolean) => Promise<void>
+
+  /** Set the controller for a side ('manual' / 'random' / 'heuristic' / 'llm'). */
+  setController: (side: 'blue' | 'red', kind: ControllerKind) => Promise<void>
+  /** Trigger the server to run the AI for the given side, lock its orders. */
+  playSideWithAI: (side: 'blue' | 'red') => Promise<void>
 
   // ---- Turn flow -------------------------------------------------
   /** Pull the latest turn meta (scores, locks, counts) from /api/turn. */
@@ -115,6 +131,27 @@ export interface GameOverInfo {
   blue_hp_pct: number
   red_hp_pct: number
   turn: number
+}
+
+
+/** Kinds of side-controller. 'manual' = human submits via UI. */
+export type ControllerKind = 'manual' | 'random' | 'heuristic' | 'llm'
+
+
+/** Reasoning trace returned by /api/ai/play and cached server-side. */
+export interface AIReasoning {
+  controller: string
+  turn: number | null
+  summary: string
+  decisions: Array<{
+    unit_id: string
+    kind?: string
+    action_id?: number
+    target_hex?: [number, number] | null
+    intent?: string
+    rationale?: string
+  }>
+  fallback: boolean
 }
 
 
@@ -178,6 +215,9 @@ export const useStore = create<AppState>((set, get) => ({
   replaying: false,
   hotseatReplay: null,
   gameOver: null,
+  controllers: { blue: 'manual', red: 'manual' },
+  aiReasoning: { blue: null, red: null },
+  aiThinking: { blue: false, red: false },
   eventLog: [],
 
   setGame: (g) => set({ game: g }),
@@ -274,6 +314,59 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  setController: async (side, kind) => {
+    try {
+      const r = await fetchJson<{ ok: boolean; controllers: Record<'blue'|'red', ControllerKind> }>(
+        '/api/ai/controller', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ side, kind }),
+        },
+      )
+      // Mirror server truth.
+      set({ controllers: { ...get().controllers, ...r.controllers } })
+    } catch (e) {
+      console.error('setController failed', e)
+    }
+  },
+
+  playSideWithAI: async (side) => {
+    set((s) => ({ aiThinking: { ...s.aiThinking, [side]: true } }))
+    try {
+      const r = await fetchJson<{
+        ok: boolean
+        side: string
+        controller: string
+        orders_count: number
+        summary: string
+        decisions: AIReasoning['decisions']
+        fallback: boolean
+      }>('/api/ai/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ side }),
+      })
+      set((s) => ({
+        aiReasoning: {
+          ...s.aiReasoning,
+          [side]: {
+            controller: r.controller,
+            turn: get().turnInfo?.turn ?? null,
+            summary: r.summary,
+            decisions: r.decisions,
+            fallback: r.fallback,
+          },
+        },
+      }))
+      // Server already locked the side; refresh turn meta so the UI sees it.
+      await get().refetchTurn()
+    } catch (e) {
+      console.error('playSideWithAI failed', e)
+    } finally {
+      set((s) => ({ aiThinking: { ...s.aiThinking, [side]: false } }))
+    }
+  },
+
   refetchState: async () => {
     const v = get().assetVersion
     const game = await fetchJson<GameState>('/state.json?v=' + v)
@@ -333,6 +426,16 @@ export const useStore = create<AppState>((set, get) => ({
         body: JSON.stringify({ side, orders, lock: true }),
       })
       await get().refetchTurn()
+      // If the OTHER side is non-manual, auto-fire its AI now. The server
+      // will run the controller, submit, and lock — we just refresh.
+      const other: 'blue' | 'red' = side === 'blue' ? 'red' : 'blue'
+      const otherKind = get().controllers[other]
+      const otherTurn = get().turnInfo
+      const otherAlreadyLocked =
+        other === 'blue' ? otherTurn?.blue_locked : otherTurn?.red_locked
+      if (otherKind !== 'manual' && !otherAlreadyLocked) {
+        await get().playSideWithAI(other)
+      }
     } catch (e) {
       console.error('lockSide failed', e)
     }

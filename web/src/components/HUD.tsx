@@ -3,6 +3,7 @@ import type { BaseInstance, SensorRef, UnitInstance, WeaponRef } from '../types'
 import { ActionMenu } from './ActionMenu'
 import { RegionPicker } from './RegionPicker'
 import { ViewModeToggle, RealGameToggle } from './ViewModeToggle'
+import { ControllerSelector } from './ControllerSelector'
 
 const DOMAIN_LABEL: Record<string, string> = {
   air: 'AIR',
@@ -32,6 +33,9 @@ export function TopBar() {
       <div className="ml-auto flex items-center gap-3 flex-shrink-0">
         <FactionPill side="blue" />
         <FactionPill side="red" />
+        <div className="w-px h-5 bg-line mx-1" />
+        <ControllerSelector side="blue" />
+        <ControllerSelector side="red" />
         <div className="w-px h-5 bg-line mx-1" />
         <RealGameToggle />
         <div className="w-px h-5 bg-line mx-1" />

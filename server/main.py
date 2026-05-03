@@ -21,6 +21,7 @@ import random
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import yaml
 from fastapi import FastAPI, HTTPException
@@ -41,6 +42,9 @@ from engine.orders import (  # noqa: E402
 from engine.resolve import compute_scores, resolve_turn  # noqa: E402
 from engine.scenario import load_scenario  # noqa: E402
 from engine.state import GameState  # noqa: E402
+# Eagerly import the AI package so controller subclasses register at server
+# boot. /api/ai/controller validates against the registry at request time.
+import ai.runner  # noqa: F401  E402
 
 
 app = FastAPI(title="Wargame Gym Control Server")
@@ -74,6 +78,13 @@ _session: dict = {
     "blue_locked": False,
     "red_locked": False,
     "last_events": [],        # list[Event] from the last resolve
+    # AI control: per-side controller kind. 'manual' = humans submit via UI;
+    # any other value names a registered ai.controller (random / heuristic /
+    # llm). The frontend mirrors this state.
+    "controllers": {"blue": "manual", "red": "manual"},
+    # Last successful AI run per side. Cached so the ReasoningPanel can
+    # GET /api/ai/last_reasoning without re-rendering everything.
+    "last_reasoning": {"blue": None, "red": None},
 }
 
 
@@ -96,6 +107,9 @@ def _reset_orders() -> None:
     _session["red_orders"] = []
     _session["blue_locked"] = False
     _session["red_locked"] = False
+    # Don't reset controllers — those are session-level config, not per-turn.
+    # Don't clear last_reasoning either; the panel keeps showing the last
+    # turn's plan until the next AI run overwrites it.
 
 
 class RegionInfo(BaseModel):
@@ -533,3 +547,111 @@ async def sensor_toggle(req: SensorToggleReq) -> dict:
             "is_active": req.active,
             "summary_sensor": unit.sensor,
         }
+
+
+# ============= AI control endpoints =====================================
+
+class ControllerSetReq(BaseModel):
+    side: str        # "blue" | "red"
+    kind: str        # "manual" | "random" | "heuristic" | "llm"
+
+
+class ControllerSetResp(BaseModel):
+    ok: bool
+    controllers: dict[str, str]
+
+
+@app.get("/api/ai/controllers", response_model=ControllerSetResp)
+async def get_controllers() -> ControllerSetResp:
+    return ControllerSetResp(ok=True, controllers=dict(_session["controllers"]))
+
+
+@app.post("/api/ai/controller", response_model=ControllerSetResp)
+async def set_controller(req: ControllerSetReq) -> ControllerSetResp:
+    """Set the controller for one side. 'manual' = humans submit via UI."""
+    if req.side not in ("blue", "red"):
+        raise HTTPException(400, f"side must be blue or red, got {req.side!r}")
+    # Lazy import to avoid circulars + keep import-time cheap on cold start.
+    from ai.controller import known_kinds
+    if req.kind not in known_kinds():
+        raise HTTPException(
+            400, f"unknown controller kind {req.kind!r}. "
+                 f"Known: {known_kinds()}",
+        )
+    async with _session_lock:
+        _session["controllers"][req.side] = req.kind
+    return ControllerSetResp(ok=True, controllers=dict(_session["controllers"]))
+
+
+class AIPlayReq(BaseModel):
+    side: str        # "blue" | "red"
+    # Optional override; if absent, uses the side's session-level controller.
+    controller_kind: Optional[str] = None
+
+
+class AIPlayResp(BaseModel):
+    ok: bool
+    side: str
+    controller: str
+    orders_count: int
+    summary: str
+    decisions: list[dict]
+    fallback: bool = False
+
+
+@app.post("/api/ai/play", response_model=AIPlayResp)
+async def ai_play(req: AIPlayReq) -> AIPlayResp:
+    """Run the AI controller for one side, submit + lock its orders.
+
+    Returns the controller's reasoning (summary + per-unit decisions) so the
+    UI can render it in the ReasoningPanel without a second roundtrip.
+    """
+    if req.side not in ("blue", "red"):
+        raise HTTPException(400, f"side must be blue or red, got {req.side!r}")
+    from ai.runner import play_side as ai_play_side
+
+    async with _session_lock:
+        state = _ensure_state()
+        kind = req.controller_kind or _session["controllers"].get(req.side, "manual")
+        if kind == "manual":
+            raise HTTPException(
+                400, f"side {req.side} controller is 'manual' — "
+                     "humans submit via /api/orders, not /api/ai/play",
+            )
+        # Run the controller. Returns Pydantic Order objects + meta dict.
+        orders, meta = await ai_play_side(req.side, kind, state)
+
+        # Submit + lock through the same code path the manual UI uses.
+        _session[f"{req.side}_orders"] = list(orders)
+        _session[f"{req.side}_locked"] = True
+        _session["last_reasoning"][req.side] = {
+            "controller": kind,
+            "turn": state.turn,
+            "summary": meta.get("summary", ""),
+            "decisions": meta.get("decisions", []),
+            "fallback": bool(meta.get("fallback", False)),
+        }
+
+        return AIPlayResp(
+            ok=True,
+            side=req.side,
+            controller=kind,
+            orders_count=len(orders),
+            summary=meta.get("summary", ""),
+            decisions=meta.get("decisions", []),
+            fallback=bool(meta.get("fallback", False)),
+        )
+
+
+@app.get("/api/ai/last_reasoning")
+async def last_reasoning(side: str) -> dict:
+    """Return the cached reasoning for the given side's last AI turn."""
+    if side not in ("blue", "red"):
+        raise HTTPException(400, f"side must be blue or red, got {side!r}")
+    return _session["last_reasoning"].get(side) or {
+        "controller": None,
+        "turn": None,
+        "summary": "",
+        "decisions": [],
+        "fallback": False,
+    }

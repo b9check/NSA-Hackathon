@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useStore } from './store'
 import { MapStage } from './components/MapStage'
 import { TopBar, RightRail } from './components/HUD'
+import { ReasoningPanel } from './components/ReasoningPanel'
 import { TurnBar } from './components/TurnBar'
 import { EndGameOverlay } from './components/EndGameOverlay'
 import { BattleLog } from './components/BattleLog'
@@ -127,7 +128,12 @@ export default function App() {
           </div>
           <TurnBar />
         </div>
-        <RightRail />
+        <div className="w-[360px] flex flex-col h-full min-h-0">
+          <div className="flex-1 min-h-0">
+            <RightRail />
+          </div>
+          <ReasoningPanel />
+        </div>
         {swapping && <SwapOverlay />}
         <EndGameOverlay />
       </div>
