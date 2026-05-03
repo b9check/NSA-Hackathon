@@ -91,28 +91,11 @@ function FactionPill({ side }: { side: 'blue' | 'red' }) {
 export function RightRail() {
   const game = useStore((s) => s.game)
   const selectedUnitId = useStore((s) => s.selectedUnitId)
-  const selectUnit = useStore((s) => s.selectUnit)
   if (!game) return null
   const selected = game.units.find((u) => u.id === selectedUnitId) ?? null
-  const blue = game.units.filter((u) => u.side === 'blue')
-  const red = game.units.filter((u) => u.side === 'red')
-  const blueBases = (game.bases ?? []).filter((b) => b.side === 'blue')
-  const redBases = (game.bases ?? []).filter((b) => b.side === 'red')
 
   return (
     <div className="w-[360px] bg-panel border-l border-line flex flex-col h-full text-sm min-h-0">
-      <Section title="ORDER OF BATTLE" maxH="max-h-[13rem]">
-        <RosterGroup label="BLUE" side="blue" units={blue} selectedId={selectedUnitId} onSelect={selectUnit} />
-        <div className="h-2" />
-        <RosterGroup label="RED" side="red" units={red} selectedId={selectedUnitId} onSelect={selectUnit} />
-      </Section>
-      {(blueBases.length > 0 || redBases.length > 0) && (
-        <Section title="BASES" maxH="max-h-[7rem]">
-          {blueBases.length > 0 && <BaseGroup label="BLUE" side="blue" bases={blueBases} />}
-          {blueBases.length > 0 && redBases.length > 0 && <div className="h-2" />}
-          {redBases.length > 0 && <BaseGroup label="RED" side="red" bases={redBases} />}
-        </Section>
-      )}
       <Section title="SELECTED UNIT" grow>
         {selected ? <UnitDetail unit={selected} /> : <Empty />}
       </Section>

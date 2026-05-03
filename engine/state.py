@@ -100,7 +100,7 @@ class VictoryConfig(BaseModel):
     hp_loss_threshold: float = 0.25
     # Hard cap so a turtle deadlock can't run forever. Higher HP%
     # wins on cap; ties = draw.
-    turn_cap: int = 30
+    turn_cap: int = 20
 
 
 class MapInfo(BaseModel):
