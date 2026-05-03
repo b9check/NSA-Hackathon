@@ -60,11 +60,11 @@ has access to.
 | STRIKE            | Fire weapon at a hex within range. See §5. |
 | SCOUT             | The unit stays where it is. Every enemy in radius `scout_radius` around the unit's own hex is revealed this turn. Drone-only; passive (no emissions). Mutually exclusive with MOVE for the turn. |
 | OVERWATCH         | Skip the strike phase, then auto-fire on the first enemy that moves into your weapon range during the enemy MOVE phase. One shot per turn. |
-| DEFEND            | Unit does nothing offensive. Any incoming damage to this unit is **halved** (`⌈dmg/2⌉`, min 1) for the turn. Replaces HOLD as the "skip turn" action. |
+| HOLD              | Skip the turn. Unit takes full damage from any incoming hit. |
 | ACTIVATE_RADAR    | Turn radar ON. Free; combines with another action. |
 | DEACTIVATE_RADAR  | Turn radar OFF. Free. |
 
-There is no CAPTURE action. There are no objective hexes.
+There is no CAPTURE action. There are no objective hexes. There is no DEFEND action — HOLD does not reduce damage.
 
 ---
 
@@ -83,8 +83,6 @@ A strike order names a **hex**, not a target unit.
   hex is empty by then, the strike whiffs — but **the ammo is still spent**,
   and a one-shot self-destruct attacker still dies. You don't get the
   munition back.
-- **Defender's bonus**: if a unit was issued DEFEND this turn, any damage
-  it would take (from STRIKE or OVERWATCH) is halved (`⌈dmg/2⌉`, min 1).
 - **Ammo**: `∞` never decrements; finite ammo decrements once per STRIKE
   order, hit or miss. `0` ammo disables STRIKE.
 
@@ -112,7 +110,7 @@ color differs.
 
 | HP | Move | View | Radar | Stealth | Actions                                |
 |----|------|------|-------|---------|----------------------------------------|
-| 4  | 2    | 2    | —     | -       | MOVE, STRIKE, OVERWATCH, DEFEND        |
+| 4  | 2    | 2    | —     | -       | MOVE, STRIKE, OVERWATCH, HOLD        |
 
 | Weapon          | Range | Damage | Ammo | Hits         |
 |-----------------|-------|--------|------|--------------|
@@ -126,7 +124,7 @@ Cheap, plentiful, can engage low-flying air with manpads.
 
 | HP | Move | View | Radar | Stealth | Actions                          |
 |----|------|------|-------|---------|----------------------------------|
-| 6  | 2    | 1    | —     | -       | MOVE, STRIKE, OVERWATCH, DEFEND  |
+| 6  | 2    | 1    | —     | -       | MOVE, STRIKE, OVERWATCH, HOLD  |
 
 | Weapon | Range | Damage | Ammo | Hits   |
 |--------|-------|--------|------|--------|
@@ -140,7 +138,7 @@ Heavy hitter, blind on its own — needs a scout's help to find targets.
 
 | HP | Move | View | Radar     | Stealth | Actions                                                              |
 |----|------|------|-----------|---------|----------------------------------------------------------------------|
-| 3  | 0    | 1    | range 4   | -       | STRIKE, OVERWATCH, DEFEND, ACTIVATE_RADAR, DEACTIVATE_RADAR          |
+| 3  | 0    | 1    | range 4   | -       | STRIKE, OVERWATCH, HOLD, ACTIVATE_RADAR, DEACTIVATE_RADAR          |
 
 | Weapon | Range | Damage | Ammo | Hits      |
 |--------|-------|--------|------|-----------|
@@ -155,7 +153,7 @@ when radar's on, every enemy can see you.
 
 | HP | Move | View | Radar | Stealth | Actions                |
 |----|------|------|-------|---------|------------------------|
-| 1  | 4    | 2    | —     | -       | MOVE, SCOUT, DEFEND    |
+| 1  | 4    | 2    | —     | -       | MOVE, SCOUT, HOLD    |
 
 | Action stat   | Value |
 |---------------|-------|
@@ -185,7 +183,7 @@ One-shot loitering munition. Fly into target hex, detonate.
 
 | HP | Move | View | Radar    | Stealth | Actions                                                              |
 |----|------|------|----------|---------|----------------------------------------------------------------------|
-| 3  | 4    | 1    | range 3  | Y       | MOVE, STRIKE, OVERWATCH, DEFEND, ACTIVATE_RADAR, DEACTIVATE_RADAR    |
+| 3  | 4    | 1    | range 3  | Y       | MOVE, STRIKE, OVERWATCH, HOLD, ACTIVATE_RADAR, DEACTIVATE_RADAR    |
 
 | Weapon  | Range | Damage | Ammo | Hits             |
 |---------|-------|--------|------|------------------|
@@ -200,7 +198,7 @@ advantage at long range.
 
 | HP | Move | View | Radar | Stealth | Actions                  |
 |----|------|------|-------|---------|--------------------------|
-| 5  | 2    | 1    | —     | -       | MOVE, STRIKE, DEFEND     |
+| 5  | 2    | 1    | —     | -       | MOVE, STRIKE, HOLD     |
 
 | Weapon       | Range | Damage | Ammo | Hits         |
 |--------------|-------|--------|------|--------------|
@@ -216,7 +214,7 @@ shot. No air-to-air capability — needs fighter cover. Cannot dogfight
 
 | HP | Move | View | Radar    | Stealth | Actions                                                              |
 |----|------|------|----------|---------|----------------------------------------------------------------------|
-| 8  | 2    | 1    | range 3  | -       | MOVE, STRIKE, OVERWATCH, DEFEND, ACTIVATE_RADAR, DEACTIVATE_RADAR    |
+| 8  | 2    | 1    | range 3  | -       | MOVE, STRIKE, OVERWATCH, HOLD, ACTIVATE_RADAR, DEACTIVATE_RADAR    |
 
 | Weapon          | Range | Damage | Ammo | Hits             |
 |-----------------|-------|--------|------|------------------|
@@ -231,7 +229,7 @@ the visibility tax for it.
 
 | HP | Move | View | Radar    | Stealth | Actions                                                |
 |----|------|------|----------|---------|--------------------------------------------------------|
-| 12 | 0    | 2    | range 4  | -       | DEFEND, ACTIVATE_RADAR, DEACTIVATE_RADAR               |
+| 12 | 0    | 2    | range 4  | -       | HOLD, ACTIVATE_RADAR, DEACTIVATE_RADAR               |
 
 | Weapon         | Range | Damage | Ammo | Hits         |
 |----------------|-------|--------|------|--------------|
