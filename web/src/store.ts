@@ -64,7 +64,8 @@ interface AppState {
   gameOver: GameOverInfo | null
 
   // Battle narrative — full event history, prefixed with the turn each
-  // event was emitted on. Trimmed to last 200.
+  // event was emitted on. Capped at 5000 so a 30-turn match keeps every
+  // event from turn 1 onward (player can scroll back to game start).
   eventLog: AnnotatedEvent[]
 
   setGame: (g: GameState) => void
@@ -320,7 +321,7 @@ export const useStore = create<AppState>((set, get) => ({
           pendingOrders: {},
           targeting: null,
           pendingEvents: [...events],
-          eventLog: [...get().eventLog, ...annotated].slice(-200),
+          eventLog: [...get().eventLog, ...annotated].slice(-5000),
           selectedUnitId: null,
           viewMode: 'blue',
           game: pass1Game,
@@ -337,7 +338,7 @@ export const useStore = create<AppState>((set, get) => ({
           pendingOrders: {},
           targeting: null,
           pendingEvents: events,
-          eventLog: [...get().eventLog, ...annotated].slice(-200),
+          eventLog: [...get().eventLog, ...annotated].slice(-5000),
           selectedUnitId: null,
           viewMode: 'omniscient',
         })
