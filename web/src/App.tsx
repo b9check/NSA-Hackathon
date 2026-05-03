@@ -4,32 +4,32 @@ import { MapStage } from './components/MapStage'
 import { TopBar, RightRail } from './components/HUD'
 import { TurnBar } from './components/TurnBar'
 import { EndGameOverlay } from './components/EndGameOverlay'
-import { useMatchTimer } from './components/Timer'
 import { BattleLog } from './components/BattleLog'
 
 
-/** Watch turnInfo for annihilation conditions and end the match if so. */
-function useAnnihilationCheck() {
-  const turnInfo = useStore((s) => s.turnInfo)
+/** Watch the engine-authoritative game.winner field and surface the
+ *  EndGameOverlay once the resolver declares a victor. */
+function useWinCheck() {
   const game = useStore((s) => s.game)
+  const turnInfo = useStore((s) => s.turnInfo)
+  const replaying = useStore((s) => s.replaying)
   const gameOver = useStore((s) => s.gameOver)
-  const matchStarted = useStore((s) => s.matchStarted)
   const endMatch = useStore((s) => s.endMatch)
   useEffect(() => {
-    if (!turnInfo || !game || gameOver || !matchStarted) return
-    if (turnInfo.blue_score <= 0 || turnInfo.red_score <= 0) {
-      const winner =
-        turnInfo.blue_score === turnInfo.red_score ? 'draw' :
-        turnInfo.blue_score > turnInfo.red_score ? 'blue' : 'red'
-      endMatch({
-        winner,
-        reason: 'annihilation',
-        blue_score: turnInfo.blue_score,
-        red_score: turnInfo.red_score,
-        turn: turnInfo.turn,
-      })
-    }
-  }, [turnInfo?.blue_score, turnInfo?.red_score, gameOver, matchStarted])
+    if (!game || !game.winner || gameOver || replaying) return
+    const startBlue = game.starting_hp?.blue ?? 0
+    const startRed = game.starting_hp?.red ?? 0
+    let blueHp = 0, redHp = 0
+    for (const u of game.units) (u.side === 'blue' ? blueHp += u.hp : redHp += u.hp)
+    for (const b of game.bases) (b.side === 'blue' ? blueHp += b.hp : redHp += b.hp)
+    endMatch({
+      winner: game.winner,
+      reason: (game.win_reason ?? 'turn_cap') as any,
+      blue_hp_pct: startBlue ? blueHp / startBlue : 0,
+      red_hp_pct: startRed ? redHp / startRed : 0,
+      turn: turnInfo?.turn ?? game.turn,
+    })
+  }, [game?.winner, game?.win_reason, replaying, gameOver])
 }
 
 
@@ -94,8 +94,7 @@ export default function App() {
   const refetchState = useStore((s) => s.refetchState)
 
   useGlobalShortcuts()
-  useMatchTimer()
-  useAnnihilationCheck()
+  useWinCheck()
 
   // On mount: fetch the region list (for the picker) + the initial state.
   useEffect(() => {

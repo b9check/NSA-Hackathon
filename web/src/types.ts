@@ -94,9 +94,12 @@ export interface BaseInstance {
 }
 
 export interface VictoryConfig {
-  capture_hold_turns: number
-  combat_power_threshold: number
+  hp_loss_threshold: number
+  objective_hold_turns: number
+  turn_cap: number
 }
+
+export type WinReason = 'hp_collapse' | 'objective_hold' | 'turn_cap' | 'annihilation'
 
 export interface GameState {
   name: string
@@ -108,7 +111,10 @@ export interface GameState {
   bases: BaseInstance[]
   victory: VictoryConfig
   starting_total?: Record<string, number>
-  objective_points?: Record<string, number>
+  starting_hp?: Record<string, number>
+  objective_streak?: Record<string, number>
+  winner?: 'blue' | 'red' | 'draw' | null
+  win_reason?: WinReason | null
 }
 
 

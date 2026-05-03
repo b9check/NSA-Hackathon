@@ -5,7 +5,7 @@ and the future LLM agent driver. Keep field names short and JSON-friendly.
 """
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -98,8 +98,15 @@ class Objective(BaseModel):
 
 
 class VictoryConfig(BaseModel):
-    capture_hold_turns: int = 2
-    combat_power_threshold: float = 0.6
+    # Side loses if its current HP total drops to <= this fraction of its
+    # starting HP total. Replaces the old wallclock-timer end condition.
+    hp_loss_threshold: float = 0.25
+    # Alt-path: hold ALL objective hexes uncontested for this many
+    # consecutive turns -> instant win.
+    objective_hold_turns: int = 3
+    # Hard cap so a turtle deadlock can't run forever. Higher HP%
+    # wins on cap; ties = draw.
+    turn_cap: int = 30
 
 
 class MapInfo(BaseModel):
@@ -122,17 +129,25 @@ class GameState(BaseModel):
     # doesn't artificially flatten when destroyed units leave the list.
     # Keys: "blue", "red".
     starting_total: dict[str, float] = Field(default_factory=dict)
-    # Accumulated objective-control bonus, capped per side. Drives the
-    # second half of compute_scores().
-    objective_points: dict[str, float] = Field(
-        default_factory=lambda: {"blue": 0.0, "red": 0.0},
+    # Total HP at game start (units + bases), per side. Denominator for
+    # the new HP-threshold win condition.
+    starting_hp: dict[str, int] = Field(default_factory=dict)
+    # Consecutive turns each side has held ALL objective hexes
+    # uncontested. Triggers the objective-hold win path when it reaches
+    # victory.objective_hold_turns.
+    objective_streak: dict[str, int] = Field(
+        default_factory=lambda: {"blue": 0, "red": 0},
     )
+    # Game-over decision once the winner is determined. None = match
+    # in progress.
+    winner: Optional[str] = None       # "blue" | "red" | "draw" | None
+    win_reason: Optional[str] = None   # "hp_collapse" | "objective_hold" | "turn_cap" | "annihilation"
 
-    def unit_by_id(self, uid: str) -> UnitInstance | None:
+    def unit_by_id(self, uid: str) -> Optional[UnitInstance]:
         return next((u for u in self.units if u.id == uid), None)
 
     def units_at(self, col: int, row: int) -> list[UnitInstance]:
         return [u for u in self.units if u.col == col and u.row == row]
 
-    def base_by_id(self, bid: str) -> BaseInstance | None:
+    def base_by_id(self, bid: str) -> Optional[BaseInstance]:
         return next((b for b in self.bases if b.id == bid), None)

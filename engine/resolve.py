@@ -46,10 +46,10 @@ from engine.orders import (
 from engine.state import BaseInstance, GameState, UnitInstance
 
 
-# ----- objective bonus -----
-# A side that holds an objective hex (any of its land/amphib units sitting
-# on it, no enemy on the same hex) earns this many score points per turn.
-# Hard cap so a turtle strategy can't run away with the score.
+# ----- objective bonus (legacy / display-only) -----
+# Kept around because compute_scores() still serves the HUD's score
+# pill. The end-game decision is now driven by HP threshold + objective
+# streak in compute_winner(), not by these.
 OBJECTIVE_BONUS_PER_TURN = 5.0
 OBJECTIVE_BONUS_CAP = 30.0
 
@@ -347,28 +347,10 @@ def _phase_update(
     state: GameState, orders: list[Order], game_seed: int, turn: int,
 ) -> list[Event]:
     events: list[Event] = []
-    # ---- Objective bonus: +OBJECTIVE_BONUS_PER_TURN per held objective,
-    #       capped per side at OBJECTIVE_BONUS_CAP. "Held" = the side has
-    #       at least one ground unit on the hex AND the enemy doesn't.
-    for o in state.map.objective_hexes:
-        h = (o.col, o.row)
-        sides = {u.side for u in state.units
-                 if (u.col, u.row) == h
-                 and u.domain in ("land", "amphib")}
-        if len(sides) == 1:
-            side = next(iter(sides))
-            cur = state.objective_points.get(side, 0.0)
-            after = min(OBJECTIVE_BONUS_CAP, cur + OBJECTIVE_BONUS_PER_TURN)
-            if after > cur:
-                state.objective_points[side] = after
-                events.append(CaptureEvent(
-                    hex=h, side=side,
-                    counter=int(after),
-                    threshold=int(OBJECTIVE_BONUS_CAP),
-                    controller=side,
-                ))
 
-    # Remove dead entities + emit destroyed events.
+    # ---- Step 1: remove dead entities BEFORE computing capture / streak.
+    # (Bug fix from review: a unit killed this turn shouldn't tick the
+    # capture counter for its side.)
     survivors: list[UnitInstance] = []
     for u in state.units:
         if u.hp <= 0:
@@ -384,20 +366,58 @@ def _phase_update(
             surviving_bases.append(b)
     state.bases = surviving_bases
 
-    # Turn end + score
+    # ---- Step 2: objective hold streak (per-side; resets on contest).
+    # A side has the streak iff it holds EVERY objective hex with at
+    # least one ground unit and no enemy unit on the same hex.
+    objs = state.map.objective_hexes
+    occupants_by_hex: dict[tuple[int, int], set[str]] = {}
+    for o in objs:
+        h = (o.col, o.row)
+        occupants_by_hex[h] = {
+            u.side for u in state.units
+            if (u.col, u.row) == h and u.domain in ("land", "amphib")
+        }
+    sides_holding_all: set[str] = set()
+    if objs:
+        for side in ("blue", "red"):
+            holds_all = all(
+                occupants_by_hex.get((o.col, o.row)) == {side}
+                for o in objs
+            )
+            if holds_all:
+                sides_holding_all.add(side)
+    for side in ("blue", "red"):
+        if side in sides_holding_all:
+            state.objective_streak[side] = state.objective_streak.get(side, 0) + 1
+            events.append(CaptureEvent(
+                hex=(-1, -1),  # streak event isn't tied to a single hex
+                side=side,  # type: ignore[arg-type]
+                counter=state.objective_streak[side],
+                threshold=state.victory.objective_hold_turns,
+                controller=side if state.objective_streak[side] >= state.victory.objective_hold_turns else None,  # type: ignore[arg-type]
+            ))
+        else:
+            state.objective_streak[side] = 0
+
+    # ---- Step 3: turn end event + advance counter + win check.
     blue_s, red_s = compute_scores(state)
     events.append(TurnEndEvent(turn=turn, blue_score=blue_s, red_score=red_s))
     state.turn = turn + 1
+
+    # ---- Step 4: end-of-game decision.
+    winner, reason = compute_winner(state)
+    if winner is not None:
+        state.winner = winner
+        state.win_reason = reason
+
     return events
 
 
 def compute_scores(state: GameState) -> tuple[float, float]:
-    """Score = cost-weighted health (100 = full strength) + objective bonus.
+    """Cost-weighted health, normalized to 100 at full strength.
 
-    Combat-power denominator is the side's STARTING total so attrition
-    visibly shaves points (a side annihilated reads ~0 + objective_bonus).
-    Objective bonus caps at OBJECTIVE_BONUS_CAP so a turtle strategy can't
-    run away with the score.
+    Display-only: the HUD shows this number for flavor. The end-game
+    decision lives in compute_winner() and uses HP totals directly.
     """
     def score(side: str) -> float:
         cur = 0.0
@@ -410,13 +430,89 @@ def compute_scores(state: GameState) -> tuple[float, float]:
                 continue
             cur += 50.0 * (b.hp / max(b.max_hp, 1))
         total = state.starting_total.get(side, 0.0)
-        base = 100.0 * cur / total if total else 0.0
-        bonus = min(
-            OBJECTIVE_BONUS_CAP,
-            state.objective_points.get(side, 0.0),
-        )
-        return round(base + bonus, 1)
+        if total == 0:
+            return 0.0
+        return round(100.0 * cur / total, 1)
     return score("blue"), score("red")
+
+
+def _hp_total(state: GameState, side: str) -> int:
+    """Sum of current HP across all surviving units + bases for a side."""
+    return (
+        sum(u.hp for u in state.units if u.side == side)
+        + sum(b.hp for b in state.bases if b.side == side)
+    )
+
+
+def _hp_pct(state: GameState, side: str) -> float:
+    cur = _hp_total(state, side)
+    start = state.starting_hp.get(side, 0)
+    return cur / start if start > 0 else 0.0
+
+
+def compute_winner(state: GameState) -> tuple[str | None, str | None]:
+    """End-of-game decision. Returns (winner, reason) or (None, None) if
+    the match is still in progress.
+
+    Win conditions, evaluated in priority order:
+      1. Objective-hold path: a side has held all objectives for
+         victory.objective_hold_turns consecutive turns -> that side wins.
+      2. Annihilation: a side has zero units AND zero bases -> the other
+         side wins (or draw if both annihilated).
+      3. HP collapse: a side's HP total has dropped to <= threshold % of
+         starting HP -> the other side wins. Both crossing simultaneously
+         tiebreaks by HP%.
+      4. Turn cap: turn >= victory.turn_cap -> higher HP% wins; tie -> draw.
+    Otherwise (None, None) — game continues.
+    """
+    v = state.victory
+    blue_alive = len(state.units) + len(state.bases) > 0 and any(
+        (u.side == "blue" for u in state.units)
+    ) or any(b.side == "blue" for b in state.bases)
+    red_alive = any(u.side == "red" for u in state.units) or any(
+        b.side == "red" for b in state.bases
+    )
+
+    # 1) Objective hold
+    for side in ("blue", "red"):
+        if state.objective_streak.get(side, 0) >= v.objective_hold_turns and v.objective_hold_turns > 0:
+            return side, "objective_hold"
+
+    # 2) Annihilation
+    blue_hp = _hp_total(state, "blue")
+    red_hp = _hp_total(state, "red")
+    if blue_hp <= 0 and red_hp <= 0:
+        return "draw", "annihilation"
+    if blue_hp <= 0:
+        return "red", "annihilation"
+    if red_hp <= 0:
+        return "blue", "annihilation"
+
+    # 3) HP collapse
+    blue_pct = _hp_pct(state, "blue")
+    red_pct = _hp_pct(state, "red")
+    blue_collapsed = blue_pct <= v.hp_loss_threshold
+    red_collapsed = red_pct <= v.hp_loss_threshold
+    if blue_collapsed and red_collapsed:
+        if blue_pct > red_pct:
+            return "blue", "hp_collapse"
+        if red_pct > blue_pct:
+            return "red", "hp_collapse"
+        return "draw", "hp_collapse"
+    if blue_collapsed:
+        return "red", "hp_collapse"
+    if red_collapsed:
+        return "blue", "hp_collapse"
+
+    # 4) Turn cap
+    if state.turn >= v.turn_cap:
+        if blue_pct > red_pct:
+            return "blue", "turn_cap"
+        if red_pct > blue_pct:
+            return "red", "turn_cap"
+        return "draw", "turn_cap"
+
+    return None, None
 
 
 # ---- Driver ----------------------------------------------------------

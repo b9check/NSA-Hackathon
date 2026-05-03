@@ -152,10 +152,13 @@ def load_scenario(path: str | Path) -> GameState:
     victory = VictoryConfig(**raw.get("victory", {}))
 
     starting_total: dict[str, float] = {"blue": 0.0, "red": 0.0}
+    starting_hp: dict[str, int] = {"blue": 0, "red": 0}
     for u in unit_instances:
         starting_total[u.side] += u.cost
+        starting_hp[u.side] += u.max_hp
     for b in base_instances:
         starting_total[b.side] += 50.0  # bases worth 50 each (matches resolver)
+        starting_hp[b.side] += b.max_hp
 
     return GameState(
         name=raw["name"],
@@ -167,5 +170,6 @@ def load_scenario(path: str | Path) -> GameState:
         bases=base_instances,
         victory=victory,
         starting_total=starting_total,
-        objective_points={"blue": 0.0, "red": 0.0},
+        starting_hp=starting_hp,
+        objective_streak={"blue": 0, "red": 0},
     )

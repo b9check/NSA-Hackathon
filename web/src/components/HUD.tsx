@@ -14,27 +14,29 @@ const DOMAIN_LABEL: Record<string, string> = {
 export function TopBar() {
   const game = useStore((s) => s.game)
   if (!game) return null
-  const blueObj = game.objective_points?.blue ?? 0
-  const redObj = game.objective_points?.red ?? 0
+  const v = game.victory
+  const hpThresholdPct = Math.round((v?.hp_loss_threshold ?? 0.25) * 100)
+  const holdTurns = v?.objective_hold_turns ?? 3
+  const blueStreak = game.objective_streak?.blue ?? 0
+  const redStreak = game.objective_streak?.red ?? 0
   return (
     <div className="h-12 bg-panel border-b border-line flex items-center px-5 text-sm font-mono">
       <div className="text-amber font-semibold tracking-widest">{game.name.toUpperCase()}</div>
       <div className="mx-6 text-mute">|</div>
       <div className="text-mute">WIN</div>
       <div className="ml-2 text-fg">
-        highest score in 5:00
+        break enemy to {hpThresholdPct}% HP, hold all objectives {holdTurns}t, or annihilate
       </div>
       <div className="mx-6 text-mute">|</div>
       <div className="text-mute">OBJECTIVES</div>
       <div className="ml-2 flex items-center gap-2">
         <span className="text-amber">{game.map.objective_hexes.length}</span>
-        <span className="text-mute text-xs">+5/turn ea, cap +30</span>
-        {(blueObj > 0 || redObj > 0) && (
+        {(blueStreak > 0 || redStreak > 0) && (
           <>
             <span className="text-mute mx-1">·</span>
-            <span className="text-blue">B {blueObj.toFixed(0)}</span>
+            <span className="text-blue">B {blueStreak}/{holdTurns}</span>
             <span className="text-mute">/</span>
-            <span className="text-red">R {redObj.toFixed(0)}</span>
+            <span className="text-red">R {redStreak}/{holdTurns}</span>
           </>
         )}
       </div>

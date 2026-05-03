@@ -9,7 +9,7 @@
 // RESOLVING -> spinner; cleared when /api/resolve returns + state refetches.
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { TimerPill } from './Timer'
+import { HpStatus } from './Timer'
 
 
 /** Smoothly interpolate to a numeric target. */
@@ -49,7 +49,6 @@ export function TurnBar() {
   const resolveTurn = useStore((s) => s.resolveTurn)
   const resolving = useStore((s) => s.resolving)
   const pendingOrders = useStore((s) => s.pendingOrders)
-  const startMatch = useStore((s) => s.startMatch)
 
   if (!game || !turnInfo) {
     return (
@@ -70,19 +69,17 @@ export function TurnBar() {
   const canResolve = blueLocked && redLocked && !resolving
 
   const lockBlue = async () => {
-    startMatch()
     await lockSide('blue')
     if (viewMode !== 'red') setViewMode('red')
   }
   const lockRed = async () => {
-    startMatch()
     await lockSide('red')
   }
 
   return (
     <div className="h-12 bg-panel border-t border-line flex items-center px-4 gap-3 font-mono text-[11px]">
-      {/* Match clock */}
-      <TimerPill />
+      {/* HP bars (blue + red) — replaces the wallclock. */}
+      <HpStatus />
 
       <div className="w-px h-5 bg-line" />
 
