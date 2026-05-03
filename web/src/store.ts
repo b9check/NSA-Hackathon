@@ -97,6 +97,9 @@ interface AppState {
   setController: (side: 'blue' | 'red', kind: ControllerKind) => Promise<void>
   /** Trigger the server to run the AI for the given side, lock its orders. */
   playSideWithAI: (side: 'blue' | 'red') => Promise<void>
+  /** Run one full turn when both sides are AI: fire blue + red concurrently
+   *  on the server, then resolve. No-op if either side is manual. */
+  runAITurn: () => Promise<void>
   /** End the current game (force-forfeit if no winner yet) + run the
    *  reflect pass to extract lessons into the memory store. */
   endGameAndReflect: (opts?: { force?: boolean }) => Promise<void>
@@ -407,6 +410,27 @@ export const useStore = create<AppState>((set, get) => ({
     } finally {
       set((s) => ({ aiThinking: { ...s.aiThinking, [side]: false } }))
     }
+  },
+
+  runAITurn: async () => {
+    const { controllers, turnInfo, resolving, replaying } = get()
+    if (resolving || replaying) return
+    if (controllers.blue === 'manual' || controllers.red === 'manual') {
+      console.warn('runAITurn called but at least one side is manual')
+      return
+    }
+    // Server serializes the LLM calls under the session lock — fire both
+    // requests in parallel from the client; the second waits for the
+    // first to release the lock, but we still get a single round trip
+    // bookkeeping here. Total wallclock ≈ 2 × LLM latency on Sonnet.
+    const blueLocked = !!turnInfo?.blue_locked
+    const redLocked = !!turnInfo?.red_locked
+    const tasks: Promise<void>[] = []
+    if (!blueLocked) tasks.push(get().playSideWithAI('blue'))
+    if (!redLocked) tasks.push(get().playSideWithAI('red'))
+    await Promise.all(tasks)
+    // Both sides should now be locked — resolve the turn.
+    await get().resolveTurn()
   },
 
   refetchState: async () => {

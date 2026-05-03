@@ -49,6 +49,9 @@ export function TurnBar() {
   const resolveTurn = useStore((s) => s.resolveTurn)
   const resolving = useStore((s) => s.resolving)
   const pendingOrders = useStore((s) => s.pendingOrders)
+  const controllers = useStore((s) => s.controllers)
+  const aiThinking = useStore((s) => s.aiThinking)
+  const runAITurn = useStore((s) => s.runAITurn)
 
   if (!game || !turnInfo) {
     return (
@@ -92,47 +95,102 @@ export function TurnBar() {
 
       <div className="w-px h-5 bg-line" />
 
-      {/* Blue */}
-      <SideControl
-        side="blue"
-        score={turnInfo.blue_score}
-        ordered={localBlue}
-        total={blueUnits.length}
-        locked={blueLocked}
-        onLock={lockBlue}
-        disabled={resolving}
-      />
+      {/* Per-side controls: only render the LOCK pill for sides that the
+          human is driving. AI sides lock automatically when triggered. */}
+      {controllers.blue === 'manual' ? (
+        <SideControl
+          side="blue"
+          score={turnInfo.blue_score}
+          ordered={localBlue}
+          total={blueUnits.length}
+          locked={blueLocked}
+          onLock={lockBlue}
+          disabled={resolving}
+        />
+      ) : (
+        <AISideStatus
+          side="blue"
+          locked={blueLocked}
+          thinking={aiThinking.blue}
+          score={turnInfo.blue_score}
+        />
+      )}
 
-      {/* Red */}
-      <SideControl
-        side="red"
-        score={turnInfo.red_score}
-        ordered={localRed}
-        total={redUnits.length}
-        locked={redLocked}
-        onLock={lockRed}
-        disabled={resolving}
-      />
+      {controllers.red === 'manual' ? (
+        <SideControl
+          side="red"
+          score={turnInfo.red_score}
+          ordered={localRed}
+          total={redUnits.length}
+          locked={redLocked}
+          onLock={lockRed}
+          disabled={resolving}
+        />
+      ) : (
+        <AISideStatus
+          side="red"
+          locked={redLocked}
+          thinking={aiThinking.red}
+          score={turnInfo.red_score}
+        />
+      )}
 
       <div className="flex-1" />
 
       <EndGameButton />
 
-      {/* Resolve */}
-      <button
-        onClick={() => canResolve && resolveTurn()}
-        disabled={!canResolve}
-        className={[
-          'h-8 px-4 rounded-sm border tracking-widest text-[11px]',
-          'transition-colors',
-          canResolve
-            ? 'bg-amber/10 border-amber text-amber animate-pulse hover:bg-amber/20'
-            : 'border-line text-mute opacity-50 cursor-not-allowed',
-        ].join(' ')}
-      >
-        {resolving ? 'RESOLVING…' : 'RESOLVE TURN'}
-      </button>
+      {/* Action button: in BOTH-AI mode, single RUN AI TURN; otherwise the
+          existing RESOLVE TURN that requires both sides to be locked. */}
+      {controllers.blue !== 'manual' && controllers.red !== 'manual' ? (
+        <RunAITurnButton
+          onRun={runAITurn}
+          thinking={aiThinking.blue || aiThinking.red}
+          resolving={resolving}
+        />
+      ) : (
+        <button
+          onClick={() => canResolve && resolveTurn()}
+          disabled={!canResolve}
+          className={[
+            'h-8 px-4 rounded-sm border tracking-widest text-[11px]',
+            'transition-colors',
+            canResolve
+              ? 'bg-amber/10 border-amber text-amber animate-pulse hover:bg-amber/20'
+              : 'border-line text-mute opacity-50 cursor-not-allowed',
+          ].join(' ')}
+        >
+          {resolving ? 'RESOLVING…' : 'RESOLVE TURN'}
+        </button>
+      )}
     </div>
+  )
+}
+
+
+function RunAITurnButton({
+  onRun, thinking, resolving,
+}: {
+  onRun: () => Promise<void>
+  thinking: boolean
+  resolving: boolean
+}) {
+  const busy = thinking || resolving
+  const label = thinking ? 'AI THINKING…' : resolving ? 'RESOLVING…' : 'RUN AI TURN'
+  return (
+    <button
+      onClick={() => !busy && onRun()}
+      disabled={busy}
+      title="Both sides are AI — fire both controllers and resolve."
+      className={[
+        'h-8 px-4 rounded-sm border tracking-widest text-[11px]',
+        'transition-colors',
+        busy
+          ? 'border-amber/60 text-amber/70 bg-amber/5'
+          : 'bg-amber/10 border-amber text-amber animate-pulse hover:bg-amber/20',
+      ].join(' ')}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -159,6 +217,34 @@ function EndGameButton() {
     >
       {reflecting ? 'REFLECTING…' : 'END & LEARN'}
     </button>
+  )
+}
+
+
+function AISideStatus({
+  side, locked, thinking, score,
+}: {
+  side: 'blue' | 'red'
+  locked: boolean
+  thinking: boolean
+  score: number
+}) {
+  const c = side === 'blue' ? 'text-blue' : 'text-red'
+  const dot = side === 'blue' ? 'bg-blue' : 'bg-red'
+  const status = thinking ? 'THINKING…' : locked ? 'LOCKED' : 'IDLE'
+  const statusCls = thinking ? 'text-amber animate-pulse'
+                  : locked ? 'text-amber'
+                  : 'text-mute'
+  const shownScore = useTweenedNumber(score)
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+      <span className={`${c} font-semibold tracking-widest`}>{side.toUpperCase()}</span>
+      <span className="text-fg tabular-nums w-10 text-right">{shownScore.toFixed(1)}</span>
+      <span className={`text-[10px] tracking-widest font-mono ${statusCls}`}>
+        {status}
+      </span>
+    </div>
   )
 }
 
