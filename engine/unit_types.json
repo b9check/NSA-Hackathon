@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "_doc": [
+    "Single source of truth for unit behavior. Eight abstract types.",
+    "Side (blue / red) is set per instance, not per type — both sides",
+    "draw from the same roster.",
+    "",
+    "Field reference:",
+    "  domain          ground | air | sea | fixed",
+    "  hp              starting + max HP",
+    "  move_range      hexes per turn (0 = stationary)",
+    "  sensor_range    detection radius in hexes (0 = own hex only)",
+    "  stealth         halves any detector's effective range vs this unit",
+    "  actions         dict of permitted actions, keyed by action kind:",
+    "                  move | strike | scout | overwatch | hold | capture",
+    "                  - move:      no params (uses move_range above)",
+    "                  - strike:    {range, damage, pkill{ground,air,sea,fixed}, ammo}",
+    "                                ammo = -1 means unlimited; self_destruct=true",
+    "                                means the attacker dies after firing (one-shot).",
+    "                  - scout:     {range, bonus_sensor}",
+    "                  - overwatch: {pkill_factor: 0..1}, defaults to 0.7",
+    "                  - hold:      no params",
+    "                  - capture:   no params (only for ground domain)",
+    "  discovery       {radius, sees: list of domains the unit can detect}",
+    "                  used by sensor fusion / agent behavior layer later."
+  ],
+
+  "unit_types": {
+
+    "infantry": {
+      "display": "Infantry",
+      "glyph": "I",
+      "domain": "ground",
+      "hp": 4,
+      "move_range": 2,
+      "sensor_range": 2,
+      "actions": {
+        "move":      {},
+        "strike":    {
+          "range": 1, "damage": 1, "ammo": -1,
+          "pkill": {"ground": 0.50, "air": 0.30, "sea": 0.00, "fixed": 0.30}
+        },
+        "overwatch": {"pkill_factor": 0.5},
+        "hold":      {},
+        "capture":   {}
+      },
+      "discovery": {"radius": 2, "sees": ["ground", "air", "sea"]}
+    },
+
+    "armor": {
+      "display": "Armor",
+      "glyph": "T",
+      "domain": "ground",
+      "hp": 6,
+      "move_range": 2,
+      "sensor_range": 1,
+      "actions": {
+        "move":      {},
+        "strike":    {
+          "range": 1, "damage": 2, "ammo": -1,
+          "pkill": {"ground": 0.70, "air": 0.00, "sea": 0.00, "fixed": 0.50}
+        },
+        "overwatch": {"pkill_factor": 0.7},
+        "hold":      {}
+      },
+      "discovery": {"radius": 1, "sees": ["ground"]}
+    },
+
+    "missile_launcher": {
+      "display": "Missile Launcher",
+      "glyph": "S",
+      "domain": "ground",
+      "hp": 3,
+      "move_range": 0,
+      "sensor_range": 2,
+      "actions": {
+        "strike":    {
+          "range": 4, "damage": 2, "ammo": 4,
+          "pkill": {"ground": 0.00, "air": 0.70, "sea": 0.30, "fixed": 0.00}
+        },
+        "overwatch": {"pkill_factor": 0.7},
+        "hold":      {}
+      },
+      "discovery": {"radius": 2, "sees": ["air"]}
+    },
+
+    "scout_drone": {
+      "display": "Scout Drone",
+      "glyph": "U",
+      "domain": "air",
+      "hp": 1,
+      "move_range": 4,
+      "sensor_range": 4,
+      "actions": {
+        "move":  {},
+        "scout": {"range": 4, "bonus_sensor": 2},
+        "hold":  {}
+      },
+      "discovery": {"radius": 4, "sees": ["ground", "air", "sea"]}
+    },
+
+    "strike_drone": {
+      "display": "Strike Drone",
+      "glyph": "K",
+      "domain": "air",
+      "hp": 1,
+      "move_range": 3,
+      "sensor_range": 1,
+      "actions": {
+        "move":   {},
+        "strike": {
+          "range": 0, "damage": 3, "ammo": 1, "self_destruct": true,
+          "pkill": {"ground": 0.70, "air": 0.00, "sea": 0.40, "fixed": 0.60}
+        }
+      },
+      "discovery": {"radius": 1, "sees": ["ground", "sea"]}
+    },
+
+    "fighter": {
+      "display": "Fighter",
+      "glyph": "A",
+      "domain": "air",
+      "hp": 3,
+      "move_range": 4,
+      "sensor_range": 1,
+      "stealth": true,
+      "actions": {
+        "move":      {},
+        "scout":     {"range": 4, "bonus_sensor": 1},
+        "strike":    {
+          "range": 3, "damage": 2, "ammo": 4,
+          "pkill": {"ground": 0.70, "air": 0.00, "sea": 0.60, "fixed": 0.70}
+        },
+        "overwatch": {"pkill_factor": 0.6},
+        "hold":      {}
+      },
+      "discovery": {"radius": 1, "sees": ["air", "ground", "sea"]}
+    },
+
+    "destroyer": {
+      "display": "Destroyer",
+      "glyph": "N",
+      "domain": "sea",
+      "hp": 8,
+      "move_range": 2,
+      "sensor_range": 3,
+      "actions": {
+        "move":      {},
+        "strike":    {
+          "range": 4, "damage": 2, "ammo": 6,
+          "pkill": {"ground": 0.50, "air": 0.60, "sea": 0.60, "fixed": 0.40}
+        },
+        "overwatch": {"pkill_factor": 0.6},
+        "hold":      {}
+      },
+      "discovery": {"radius": 3, "sees": ["air", "sea", "ground"]}
+    },
+
+    "base": {
+      "display": "Base",
+      "glyph": "B",
+      "domain": "fixed",
+      "hp": 12,
+      "move_range": 0,
+      "sensor_range": 2,
+      "actions": {
+        "hold": {}
+      },
+      "discovery": {"radius": 2, "sees": ["air", "ground", "sea"]},
+      "_note": "Bases will gain a 'spawn' action in a future phase."
+    }
+  }
+}

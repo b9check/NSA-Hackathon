@@ -1,5 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
 # Node / frontend
 node_modules/
+dist/
+.vite/
 sensor_pipeline/frontend/build/
 sensor_pipeline/frontend/.cache/
 *.log
@@ -7,27 +19,32 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-.pytest_cache/
-.venv/
-venv/
-
 # Backend runtime artefacts
 sensor_pipeline/backend/server_stdout.log
 sensor_pipeline/backend/server_stderr.log
 sensor_pipeline/backend/*.log
+
+# Env
+.env
+.env.local
+
+# Generated state / replays (keep .gitkeep)
+replays/*
+!replays/.gitkeep
+web/public/state.json
 
 # IDE / editor
 .vscode/
 .idea/
 .claude/
 *.swp
+
+# OS
 .DS_Store
 Thumbs.db
 
 # Misc
 *.bak
+
+# Brian accidentally committed his __pycache__; ignore for future
+sensor_pipeline/backend/__pycache__/
