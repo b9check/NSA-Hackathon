@@ -16,29 +16,14 @@ export function TopBar() {
   if (!game) return null
   const v = game.victory
   const hpThresholdPct = Math.round((v?.hp_loss_threshold ?? 0.25) * 100)
-  const holdTurns = v?.objective_hold_turns ?? 3
-  const blueStreak = game.objective_streak?.blue ?? 0
-  const redStreak = game.objective_streak?.red ?? 0
+  const turnCap = v?.turn_cap ?? 30
   return (
     <div className="h-12 bg-panel border-b border-line flex items-center px-5 text-sm font-mono">
       <div className="text-amber font-semibold tracking-widest">{game.name.toUpperCase()}</div>
       <div className="mx-6 text-mute">|</div>
       <div className="text-mute">WIN</div>
       <div className="ml-2 text-fg">
-        break enemy to {hpThresholdPct}% HP, hold all objectives {holdTurns}t, or annihilate
-      </div>
-      <div className="mx-6 text-mute">|</div>
-      <div className="text-mute">OBJECTIVES</div>
-      <div className="ml-2 flex items-center gap-2">
-        <span className="text-amber">{game.map.objective_hexes.length}</span>
-        {(blueStreak > 0 || redStreak > 0) && (
-          <>
-            <span className="text-mute mx-1">·</span>
-            <span className="text-blue">B {blueStreak}/{holdTurns}</span>
-            <span className="text-mute">/</span>
-            <span className="text-red">R {redStreak}/{holdTurns}</span>
-          </>
-        )}
+        break enemy to {hpThresholdPct}% HP, annihilate, or higher HP% at turn {turnCap}
       </div>
       <div className="ml-auto flex items-center gap-4">
         <FactionPill side="blue" />
@@ -313,24 +298,19 @@ const SENSOR_BADGE: Record<string, string> = {
 
 function humanKind(k: WeaponRef['kind']): string {
   return ({
-    aam: 'AAM',
-    asm_air: 'ASM',
-    asm_ship: 'ASM',
+    gun: 'GUN',
+    missile: 'MISSILE',
     sam: 'SAM',
-    gun_naval: 'GUN',
-    gun_armor: 'GUN',
-    manpads: 'MANPADS',
-    loitering: 'LOITER',
+    kamikaze: 'OWA',
+    bomb: 'BOMB',
   } as Record<string, string>)[k] ?? k.toUpperCase()
 }
 
 function weaponMeta(w: WeaponRef): string {
-  const parts: string[] = [`r${w.range}`]
+  const parts: string[] = [`r${w.range}`, `${w.damage}dmg`]
   if (w.ammo > 0) parts.push(`${w.ammo}rd`)
-  const pk = Object.entries(w.pkill)
-    .map(([d, p]) => `${d[0].toUpperCase()}=${p.toFixed(2)}`)
-    .join(' ')
-  if (pk) parts.push(pk)
+  if (w.ammo === -1) parts.push('∞')
+  if (w.self_destruct) parts.push('SD')
   return parts.join(' · ')
 }
 

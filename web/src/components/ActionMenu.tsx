@@ -1,11 +1,11 @@
 // Action menu shown in the SELECTED UNIT panel when a friendly unit is
-// selected. Six buttons map to the engine's Order kinds. MOVE / STRIKE /
-// SCOUT / CAPTURE start a targeting flow (Phase 3.B picks up the click
-// on the map). HOLD / OVERWATCH commit immediately.
+// selected. Maps to the engine's Order kinds. MOVE / STRIKE start a
+// targeting flow (a hex click on the map commits). HOLD / OVERWATCH /
+// SCOUT commit immediately. SCOUT is drone-only.
 import { useStore } from '../store'
 import type { Order, UnitInstance } from '../types'
 
-type Kind = 'MOVE' | 'STRIKE' | 'SCOUT' | 'OVERWATCH' | 'HOLD' | 'CAPTURE'
+type Kind = 'MOVE' | 'STRIKE' | 'SCOUT' | 'OVERWATCH' | 'HOLD'
 
 const KEY_HINTS: Record<Kind, string> = {
   MOVE: 'M',
@@ -13,7 +13,6 @@ const KEY_HINTS: Record<Kind, string> = {
   SCOUT: 'V',
   OVERWATCH: 'O',
   HOLD: 'H',
-  CAPTURE: 'C',
 }
 
 
@@ -27,17 +26,8 @@ function inWeaponRange(unit: UnitInstance): boolean {
 }
 
 
-function adjacentObjective(
-  unit: UnitInstance,
-  game: import('../types').GameState,
-): boolean {
-  if (!(unit.domain === 'land' || unit.domain === 'amphib')) return false
-  for (const o of game.map.objective_hexes) {
-    const dq = Math.abs(o.col - unit.col)
-    const dr = Math.abs(o.row - unit.row)
-    if (dq <= 1 && dr <= 1) return true
-  }
-  return false
+function isScoutDrone(unit: UnitInstance): boolean {
+  return unit.type === 'scout_drone'
 }
 
 
@@ -54,18 +44,17 @@ export function ActionMenu({ unit }: { unit: UnitInstance }) {
 
   const moveable = reachableFromCurrent(unit)
   const canStrike = inWeaponRange(unit)
-  const canScout = unit.sensor > 0
-  const canCapture = adjacentObjective(unit, game)
+  const canScout = isScoutDrone(unit)
 
   const inTargetingForThis = !!targeting && targeting.unitId === unit.id
 
   const click = (kind: Kind) => {
-    if (kind === 'HOLD' || kind === 'OVERWATCH') {
+    if (kind === 'HOLD' || kind === 'OVERWATCH' || kind === 'SCOUT') {
       const order: Order = { kind, unit_id: unit.id }
       setOrder(order)
       return
     }
-    // MOVE / STRIKE / SCOUT / CAPTURE need a target; flip into targeting mode.
+    // MOVE / STRIKE need a target hex.
     if (inTargetingForThis && targeting?.kind === kind) {
       cancelTargeting()
     } else {
@@ -89,7 +78,7 @@ export function ActionMenu({ unit }: { unit: UnitInstance }) {
           label="STRIKE"
           hint={KEY_HINTS.STRIKE}
           enabled={canStrike}
-          tip={canStrike ? 'Pick visible target' : 'No weapons'}
+          tip={canStrike ? 'Pick target hex' : 'No weapons'}
           active={inTargetingForThis && targeting?.kind === 'STRIKE'}
           queued={pending?.kind === 'STRIKE'}
           onClick={() => click('STRIKE')}
@@ -98,8 +87,7 @@ export function ActionMenu({ unit }: { unit: UnitInstance }) {
           label="SCOUT"
           hint={KEY_HINTS.SCOUT}
           enabled={canScout}
-          tip={canScout ? 'Pick area to scan' : 'No sensors'}
-          active={inTargetingForThis && targeting?.kind === 'SCOUT'}
+          tip={canScout ? 'Stay put, reveal radius around drone' : 'Drone-only'}
           queued={pending?.kind === 'SCOUT'}
           onClick={() => click('SCOUT')}
         />
@@ -115,18 +103,9 @@ export function ActionMenu({ unit }: { unit: UnitInstance }) {
           label="HOLD"
           hint={KEY_HINTS.HOLD}
           enabled={true}
-          tip="Stand fast"
+          tip="Stand fast — takes full damage"
           queued={pending?.kind === 'HOLD'}
           onClick={() => click('HOLD')}
-        />
-        <ActionBtn
-          label="CAPTURE"
-          hint={KEY_HINTS.CAPTURE}
-          enabled={canCapture}
-          tip={canCapture ? 'Capture adjacent objective' : 'Not near an objective'}
-          active={inTargetingForThis && targeting?.kind === 'CAPTURE'}
-          queued={pending?.kind === 'CAPTURE'}
-          onClick={() => click('CAPTURE')}
         />
       </div>
 
@@ -159,11 +138,8 @@ export function ActionMenu({ unit }: { unit: UnitInstance }) {
 function describeOrder(o: Order): string {
   switch (o.kind) {
     case 'MOVE':
-    case 'SCOUT':
-    case 'CAPTURE':
-      return `${o.kind} (${o.target_hex[0]},${o.target_hex[1]})`
     case 'STRIKE':
-      return `STRIKE → ${o.target_id}`
+      return `${o.kind} (${o.target_hex[0]},${o.target_hex[1]})`
     default:
       return o.kind
   }

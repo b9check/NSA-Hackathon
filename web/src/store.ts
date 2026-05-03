@@ -89,7 +89,7 @@ interface AppState {
 
 export interface GameOverInfo {
   winner: 'blue' | 'red' | 'draw'
-  reason: 'hp_collapse' | 'objective_hold' | 'turn_cap' | 'annihilation'
+  reason: 'hp_collapse' | 'turn_cap' | 'annihilation'
   blue_hp_pct: number
   red_hp_pct: number
   turn: number

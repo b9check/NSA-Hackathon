@@ -39,9 +39,10 @@ class WeaponRef(BaseModel):
     """Denormalized snapshot of one of a unit's attached weapons."""
     key: str
     display: str
-    kind: str              # "aam" | "asm_air" | "asm_ship" | "sam" | ...
+    kind: str              # "gun" | "missile" | "sam" | "kamikaze" | "bomb"
     range: int
-    pkill: dict[str, float] = Field(default_factory=dict)
+    damage: int = 1                # deterministic HP removed per hit
+    self_destruct: bool = False    # attacker dies after firing (one-shot)
     ammo: int = -1
     notes: str = ""
 
@@ -92,18 +93,10 @@ class BaseInstance(BaseModel):
     weapons: list[WeaponRef] = Field(default_factory=list)
 
 
-class Objective(BaseModel):
-    col: int
-    row: int
-
-
 class VictoryConfig(BaseModel):
     # Side loses if its current HP total drops to <= this fraction of its
-    # starting HP total. Replaces the old wallclock-timer end condition.
+    # starting HP total.
     hp_loss_threshold: float = 0.25
-    # Alt-path: hold ALL objective hexes uncontested for this many
-    # consecutive turns -> instant win.
-    objective_hold_turns: int = 3
     # Hard cap so a turtle deadlock can't run forever. Higher HP%
     # wins on cap; ties = draw.
     turn_cap: int = 30
@@ -113,7 +106,6 @@ class MapInfo(BaseModel):
     cols: int
     rows: int
     cells: list[HexCell]
-    objective_hexes: list[Objective] = Field(default_factory=list)
 
 
 class GameState(BaseModel):
@@ -130,18 +122,12 @@ class GameState(BaseModel):
     # Keys: "blue", "red".
     starting_total: dict[str, float] = Field(default_factory=dict)
     # Total HP at game start (units + bases), per side. Denominator for
-    # the new HP-threshold win condition.
+    # the HP-threshold win condition.
     starting_hp: dict[str, int] = Field(default_factory=dict)
-    # Consecutive turns each side has held ALL objective hexes
-    # uncontested. Triggers the objective-hold win path when it reaches
-    # victory.objective_hold_turns.
-    objective_streak: dict[str, int] = Field(
-        default_factory=lambda: {"blue": 0, "red": 0},
-    )
     # Game-over decision once the winner is determined. None = match
     # in progress.
     winner: Optional[str] = None       # "blue" | "red" | "draw" | None
-    win_reason: Optional[str] = None   # "hp_collapse" | "objective_hold" | "turn_cap" | "annihilation"
+    win_reason: Optional[str] = None   # "hp_collapse" | "turn_cap" | "annihilation"
 
     def unit_by_id(self, uid: str) -> Optional[UnitInstance]:
         return next((u for u in self.units if u.id == uid), None)

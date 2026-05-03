@@ -176,95 +176,102 @@ def place_units(grid, cols: int, rows: int, seed: int) -> list[dict]:
 
     units: list[dict] = []
 
+    def add(uid, side, utype, pos):
+        if pos is None:
+            return
+        units.append({"id": uid, "side": side, "type": utype, "pos": pos})
+
     # ============== Blue (south) ==============
-    # Aegis cruiser: deep blue water on Blue's side — cruises in safe waters.
-    units.append({"id": "blue-cg47-1", "type": "cg47", "pos": pick(
+    add("blue-destroyer-1", "blue", "destroyer", pick(
         AND(south_half, is_deep),
         AND(south_half, is_water),
         is_water,
-    )})
-    # F-35A stealth: in own backfield (3-row band along south edge).
-    units.append({"id": "blue-f35-1", "type": "f35a", "pos": pick(
+    ))
+    add("blue-fighter-1", "blue", "fighter", pick(
         south_band,
         south_half,
-    )})
-    # MQ-9 ISR: pushed forward from Blue base, scouting toward the strait.
-    units.append({"id": "blue-mq9-1", "type": "mq9", "pos": pick(
+    ))
+    add("blue-bomber-1", "blue", "bomber", pick(
+        south_band,
+        south_half,
+    ))
+    add("blue-scout_drone-1", "blue", "scout_drone", pick(
         south_push,
         south_half,
-    )})
-    # Patriot: coastal land on Blue side — strait airspace coverage.
-    units.append({"id": "blue-patriot-1", "type": "patriot", "pos": pick(
+    ))
+    add("blue-missile_launcher-1", "blue", "missile_launcher", pick(
         AND(south_half, is_coast, is_settled),
         AND(south_half, is_coast, is_land),
         AND(south_half, is_settled),
         AND(south_half, is_land),
-    )})
-    # M1A2: settled inland on Blue side (not on the beach).
-    units.append({"id": "blue-m1a2-1", "type": "m1a2", "pos": pick(
+    ))
+    add("blue-armor-1", "blue", "armor", pick(
         AND(south_half, is_settled, not_coastal),
         AND(south_half, is_settled),
         AND(south_half, is_land),
-    )})
-    # Mech infantry pair: clustered, ideally near coast (potential amphib).
-    blue_mech_anchor = pick(
+    ))
+    blue_inf_anchor = pick(
         AND(south_half, is_coast, is_land),
         AND(south_half, is_land),
     )
-    units.append({"id": "blue-mech-1", "type": "mech_b", "pos": blue_mech_anchor})
-    units.append({"id": "blue-mech-2", "type": "mech_b", "pos": pick(
-        AND(south_half, near(blue_mech_anchor, 2), is_land),
-        AND(south_half, near(blue_mech_anchor, 4), is_land),
+    add("blue-infantry-1", "blue", "infantry", blue_inf_anchor)
+    add("blue-infantry-2", "blue", "infantry", pick(
+        AND(south_half, near(blue_inf_anchor, 2), is_land),
+        AND(south_half, near(blue_inf_anchor, 4), is_land),
         AND(south_half, is_land),
-    )})
+    ))
 
     # ============== Red (north) ==============
-    units.append({"id": "red-type055-1", "type": "type055", "pos": pick(
+    add("red-destroyer-1", "red", "destroyer", pick(
         AND(north_half, is_deep),
         AND(north_half, is_water),
         is_water,
-    )})
-    units.append({"id": "red-j20-1", "type": "j20", "pos": pick(
+    ))
+    add("red-fighter-1", "red", "fighter", pick(
         north_band,
         north_half,
-    )})
-    units.append({"id": "red-recon-1", "type": "recon_uav", "pos": pick(
+    ))
+    add("red-bomber-1", "red", "bomber", pick(
+        north_band,
+        north_half,
+    ))
+    add("red-scout_drone-1", "red", "scout_drone", pick(
         north_push,
         north_half,
-    )})
-    units.append({"id": "red-hq9-1", "type": "hq9", "pos": pick(
+    ))
+    add("red-missile_launcher-1", "red", "missile_launcher", pick(
         AND(north_half, is_coast, is_settled),
         AND(north_half, is_coast, is_land),
         AND(north_half, is_settled),
         AND(north_half, is_land),
-    )})
-    red_mech_anchor = pick(
+    ))
+    add("red-armor-1", "red", "armor", pick(
+        AND(north_half, is_settled, not_coastal),
+        AND(north_half, is_settled),
+        AND(north_half, is_land),
+    ))
+    red_inf_anchor = pick(
         AND(north_half, is_coast, is_land),
         AND(north_half, is_land),
     )
-    units.append({"id": "red-mech-1", "type": "mech_r", "pos": red_mech_anchor})
-    units.append({"id": "red-mech-2", "type": "mech_r", "pos": pick(
-        AND(north_half, near(red_mech_anchor, 2), is_land),
-        AND(north_half, near(red_mech_anchor, 4), is_land),
+    add("red-infantry-1", "red", "infantry", red_inf_anchor)
+    add("red-infantry-2", "red", "infantry", pick(
+        AND(north_half, near(red_inf_anchor, 2), is_land),
+        AND(north_half, near(red_inf_anchor, 4), is_land),
         AND(north_half, is_land),
-    )})
-    # Shahed swarm: clustered around a launch site (Red rear).
-    shahed_launch = pick(
+    ))
+    # Strike-drone pair: kamikaze, clustered in red rear.
+    sd_anchor = pick(
         AND(north_band, is_land),
         north_band,
         north_half,
     )
-    units.append({"id": "red-shahed-1", "type": "shahed", "pos": shahed_launch})
-    units.append({"id": "red-shahed-2", "type": "shahed", "pos": pick(
-        near(shahed_launch, 2),
-        near(shahed_launch, 4),
+    add("red-strike_drone-1", "red", "strike_drone", sd_anchor)
+    add("red-strike_drone-2", "red", "strike_drone", pick(
+        near(sd_anchor, 2),
+        near(sd_anchor, 4),
         north_half,
-    )})
-    units.append({"id": "red-shahed-3", "type": "shahed", "pos": pick(
-        near(shahed_launch, 2),
-        near(shahed_launch, 4),
-        north_half,
-    )})
+    ))
 
     return [u for u in units if u["pos"] is not None]
 
@@ -305,37 +312,22 @@ def place_bases(grid, cols: int, rows: int, seed: int,
 
     bases: list[dict] = []
 
-    # ---- Blue (south) ----
-    bases.append({"id": "blue-airbase-1", "type": "blue_airbase", "pos": pick(
+    def add(bid, side, pos):
+        if pos is None:
+            return
+        bases.append({"id": bid, "side": side, "type": "base", "pos": pos})
+
+    # One base per side (collapsed from prior 3-per-side).
+    add("blue-base-1", "blue", pick(
         AND(south_band, is_settled),
         AND(south_half, is_settled),
         AND(south_half, is_land),
-    )})
-    bases.append({"id": "blue-navalbase-1", "type": "blue_navalbase", "pos": pick(
-        AND(south_half, is_coast, is_settled),
-        AND(south_half, is_coast, is_land),
-        AND(south_half, is_land),
-    )})
-    bases.append({"id": "blue-fob-1", "type": "blue_fob", "pos": pick(
-        AND(south_half, is_settled),
-        AND(south_half, is_land),
-    )})
-
-    # ---- Red (north) ----
-    bases.append({"id": "red-airbase-1", "type": "red_airbase", "pos": pick(
+    ))
+    add("red-base-1", "red", pick(
         AND(north_band, is_settled),
         AND(north_half, is_settled),
         AND(north_half, is_land),
-    )})
-    bases.append({"id": "red-navalbase-1", "type": "red_navalbase", "pos": pick(
-        AND(north_half, is_coast, is_settled),
-        AND(north_half, is_coast, is_land),
-        AND(north_half, is_land),
-    )})
-    bases.append({"id": "red-launchsite-1", "type": "red_launchsite", "pos": pick(
-        AND(north_band, is_land),
-        AND(north_half, is_land),
-    )})
+    ))
 
     return [b for b in bases if b["pos"] is not None]
 
@@ -370,8 +362,8 @@ def _entity_block(entries: list[dict]) -> str:
     for e in entries:
         c, r = e["pos"][0], e["pos"][1]
         lines.append(
-            f'  - {{ id: {e["id"]:<20}, type: {e["type"]:<16}, '
-            f'pos: [{c:>2}, {r:>2}] }}'
+            f'  - {{ id: {e["id"]:<24}, side: {e["side"]:<5}, '
+            f'type: {e["type"]:<18}, pos: [{c:>2}, {r:>2}] }}'
         )
     return "\n".join(lines)
 
@@ -384,7 +376,6 @@ def write_yaml(yaml_path: Path, terrain: list[list[str]],
                               [[CHAR[t] for t in line] for line in terrain])
     units_block = _entity_block(units)
     bases_block = _entity_block(bases)
-    obj_block = "\n".join(f"    - [{o[0]}, {o[1]}]" for o in objectives)
 
     text = f"""name: "{name}"
 seed: {seed}
@@ -398,18 +389,16 @@ map:
   rows: {rows}
   terrain: |
 {terrain_block}
-  objective_hexes:
-{obj_block}
 
 victory:
-  capture_hold_turns: 2
-  combat_power_threshold: 0.6
+  hp_loss_threshold: 0.25
+  turn_cap: 30
 
-# Mobile platforms (auto-placed by scripts/sample_terrain.py per seed).
+# Mobile units (auto-placed by scripts/sample_terrain.py per seed).
 units:
 {units_block}
 
-# Fixed installations (airbase / naval base / FOB / launch site).
+# One base per side.
 bases:
 {bases_block}
 """

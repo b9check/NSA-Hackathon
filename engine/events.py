@@ -6,12 +6,12 @@ and JSON-serializable so it can also be persisted as a replay tape.
 """
 from __future__ import annotations
 
-from typing import Literal, Union
+from typing import Literal, Tuple, Union
 
 from pydantic import BaseModel
 
 
-HexCoord = tuple[int, int]
+HexCoord = Tuple[int, int]
 
 
 class _BaseEvent(BaseModel):
@@ -34,16 +34,23 @@ class MoveEvent(_BaseEvent):
 
 
 class StrikeEvent(_BaseEvent):
+    """One STRIKE order resolved.
+
+    `target_hex` is what was aimed at; `targets_hit` lists every enemy
+    entity_id in that hex after MOVE that took damage. `whiffed=True`
+    means the target hex had no enemy units after MOVE — but the strike
+    still consumed its ammo and a self-destruct attacker still dies.
+    """
     type: Literal["strike"] = "strike"
     attacker: str
-    target: str             # unit_id or base_id
-    weapon: str             # weapon key
+    weapon: str
     weapon_kind: str
-    pkill: float
-    roll: float
-    hit: bool
-    damage: int
-    remaining_hp: int
+    target_hex: HexCoord
+    damage: int                       # base damage applied to each target
+    targets_hit: list[str] = []       # entity_ids damaged this strike
+    whiffed: bool = False
+    self_destruct: bool = False       # attacker died as part of firing
+    counter_damage: int = 0           # damage taken by attacker (melee)
 
 
 class OverwatchFireEvent(_BaseEvent):
@@ -51,20 +58,8 @@ class OverwatchFireEvent(_BaseEvent):
     attacker: str
     target: str
     weapon: str
-    pkill: float
-    roll: float
-    hit: bool
     damage: int
     trigger_hex: HexCoord
-
-
-class CaptureEvent(_BaseEvent):
-    type: Literal["capture"] = "capture"
-    hex: HexCoord
-    side: Literal["blue", "red"]
-    counter: int
-    threshold: int
-    controller: Literal["blue", "red", None] = None
 
 
 class DestroyedEvent(_BaseEvent):
@@ -86,7 +81,6 @@ Event = Union[
     MoveEvent,
     StrikeEvent,
     OverwatchFireEvent,
-    CaptureEvent,
     DestroyedEvent,
     TurnEndEvent,
 ]

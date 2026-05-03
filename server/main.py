@@ -35,7 +35,7 @@ from scripts.setup_region import REGIONS  # noqa: E402
 from scripts.fetch_satellite import prewarm as _prewarm_region  # noqa: E402
 from engine.events import Event  # noqa: E402
 from engine.orders import (  # noqa: E402
-    CaptureOrder, HoldOrder, MoveOrder, Order,
+    HoldOrder, MoveOrder, Order,
     OverwatchOrder, ScoutOrder, StrikeOrder,
 )
 from engine.resolve import compute_scores, resolve_turn  # noqa: E402
@@ -112,7 +112,6 @@ class ScenarioInfo(BaseModel):
     cols: int
     rows: int
     units: int
-    objectives: int
     terrain_url: str
     state_url: str
 
@@ -231,7 +230,6 @@ async def current_scenario() -> ScenarioInfo:
         cols=int(raw["map"]["cols"]),
         rows=int(raw["map"]["rows"]),
         units=len(raw.get("units", [])),
-        objectives=len(raw["map"].get("objective_hexes", [])),
         terrain_url="/terrain.png",
         state_url="/state.json",
     )
@@ -383,7 +381,6 @@ _ORDER_CTORS = {
     "SCOUT": ScoutOrder,
     "OVERWATCH": OverwatchOrder,
     "HOLD": HoldOrder,
-    "CAPTURE": CaptureOrder,
 }
 
 

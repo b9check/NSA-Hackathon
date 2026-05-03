@@ -157,7 +157,6 @@ async function buildPixi(
 
   // ---- Tactical hex grid overlay (subtle) ----
   drawHexGrid(gridLayer, state, cellCenters)
-  drawObjectives(overlayLayer, state, cellCenters)
 
   // ---- Hover layer (interactive map background) ----
   const hoverGraphics = new Graphics()
@@ -343,7 +342,41 @@ async function buildPixi(
           )
           break
         }
-        case 'strike':
+        case 'strike': {
+          // Hex-targeted strike. `targets_hit` is every entity_id damaged.
+          // Whiff = empty target hex; we still draw the line.
+          const atkNode = nodeFor(ev.attacker)
+          if (!atkNode) break
+          const tgtCenter = cellCenters.get(`${ev.target_hex[0]},${ev.target_hex[1]}`)
+          if (!tgtCenter) break
+          await animateStrike(
+            fxLayer,
+            { x: atkNode.container.x, y: atkNode.container.y },
+            { x: tgtCenter.x, y: tgtCenter.y },
+            { hit: !ev.whiffed, pkill: 1.0, damage: ev.damage },
+          )
+          if (!ev.whiffed) {
+            for (const tid of ev.targets_hit) {
+              const node = nodeFor(tid)
+              const tgt = unitsById.get(tid) ?? basesById.get(tid)
+              if (node && tgt) {
+                tgt.hp = Math.max(0, tgt.hp - ev.damage)
+                refreshHpBar(node, tgt.hp, tgt.max_hp, tgt.side)
+                await flashAndShake(node.container)
+              }
+            }
+          }
+          // Counter-damage to attacker (melee)
+          if (ev.counter_damage > 0) {
+            const atk = unitsById.get(ev.attacker)
+            if (atk) {
+              atk.hp = Math.max(0, atk.hp - ev.counter_damage)
+              refreshHpBar(atkNode, atk.hp, atk.max_hp, atk.side)
+              await flashAndShake(atkNode.container)
+            }
+          }
+          break
+        }
         case 'overwatch_fire': {
           const atkNode = nodeFor(ev.attacker)
           const tgtNode = nodeFor(ev.target)
@@ -353,18 +386,11 @@ async function buildPixi(
             fxLayer,
             { x: atkNode.container.x, y: atkNode.container.y },
             { x: tgtNode.container.x, y: tgtNode.container.y },
-            { hit: ev.hit, pkill: ev.pkill, damage: ev.damage },
+            { hit: true, pkill: 1.0, damage: ev.damage },
           )
-          if (ev.hit && tgt) {
-            // Reflect the new HP on the bar immediately so the player
-            // sees the chunk vanish as the missile lands. The post-replay
-            // refetchState() reconciles to the resolver's truth.
-            tgt.hp = ev.remaining_hp
-            const node = nodeFor(ev.target)
-            if (node) {
-              refreshHpBar(node, ev.remaining_hp, tgt.max_hp, tgt.side)
-            }
-            // shake the target
+          if (tgt) {
+            tgt.hp = Math.max(0, tgt.hp - ev.damage)
+            refreshHpBar(tgtNode, tgt.hp, tgt.max_hp, tgt.side)
             await flashAndShake(tgtNode.container)
           }
           break
@@ -384,20 +410,6 @@ async function buildPixi(
           await animateDeath(node.container, fxLayer)
           unitNodes.delete(ev.entity_id)
           baseNodes.delete(ev.entity_id)
-          break
-        }
-        case 'capture': {
-          const c = cellCenters.get(`${ev.hex[0]},${ev.hex[1]}`)
-          if (c) {
-            popupText(
-              fxLayer,
-              c.x, c.y - 6,
-              ev.controller ? `${ev.side.toUpperCase()} CONTROLS` : `${ev.side.toUpperCase()} CAPTURING ${ev.counter}/${ev.threshold}`,
-              ev.side === 'blue' ? COLORS.blue : COLORS.red,
-              700,
-            )
-            await delay(120)
-          }
           break
         }
         case 'scout_reveal': {
@@ -451,21 +463,6 @@ function drawHexGrid(
   }
 }
 
-function drawObjectives(
-  layer: Container,
-  state: GameState,
-  centers: Map<string, { x: number; y: number; cell: HexCell }>,
-) {
-  const g = new Graphics()
-  g.filters = [new GlowFilter({ distance: 10, outerStrength: 1.6, innerStrength: 0, color: COLORS.amber })]
-  for (const o of state.map.objective_hexes) {
-    const c = centers.get(`${o.col},${o.row}`)
-    if (!c) continue
-    g.poly(hexCorners(c.x, c.y, HEX_SIZE * 0.92))
-      .stroke({ color: COLORS.amber, width: 2, alpha: 0.95 })
-  }
-  layer.addChild(g)
-}
 
 function drawReachability(
   g: Graphics,
@@ -554,32 +551,6 @@ function drawWeaponRing(
 function drawSelectionRing(g: Graphics, cx: number, cy: number) {
   g.poly(hexCorners(cx, cy, HEX_SIZE * 1.0))
     .stroke({ color: COLORS.amber, width: 2, alpha: 0.95 })
-}
-
-
-/** Compute the set of (col,row) keys covered by ANY friendly unit/base
- *  sensor on `side`. Identical to computeVisibleHexes(side), kept as its
- *  own helper so the click validators can call it without computing
- *  full fog state. */
-function computeFriendlySensorCoverage(
-  game: GameState, side: 'blue' | 'red',
-): Set<string> {
-  const out = new Set<string>()
-  const sources: Array<{ col: number; row: number; sensor: number }> = []
-  for (const u of game.units) {
-    if (u.side === side) sources.push({ col: u.col, row: u.row, sensor: u.sensor })
-  }
-  for (const b of game.bases ?? []) {
-    if (b.side === side) sources.push({ col: b.col, row: b.row, sensor: b.sensor })
-  }
-  for (const s of sources) {
-    for (const cell of game.map.cells) {
-      if (hexDistance(s.col, s.row, cell.col, cell.row) <= s.sensor) {
-        out.add(`${cell.col},${cell.row}`)
-      }
-    }
-  }
-  return out
 }
 
 
@@ -693,42 +664,32 @@ function drawQueuedOrders(
     if (!c) continue
     const color = SIDE_COLOR[u.side]
     switch (order.kind) {
-      case 'MOVE':
-      case 'CAPTURE':
-      case 'SCOUT': {
+      case 'MOVE': {
         const tgt = centers.get(`${order.target_hex[0]},${order.target_hex[1]}`)
         if (!tgt) break
-        const lineColor =
-          order.kind === 'CAPTURE' ? COLORS.amber :
-          order.kind === 'SCOUT'   ? COLORS.green :
-          color
-        drawDashedLine(g, c.x, c.y, tgt.x, tgt.y, lineColor)
-        drawArrowhead(g, c.x, c.y, tgt.x, tgt.y, lineColor)
-        if (order.kind === 'CAPTURE') {
-          drawFlag(g, tgt.x, tgt.y)
-        } else if (order.kind === 'SCOUT') {
-          drawScoutHalo(g, tgt.x, tgt.y)
-        }
+        drawDashedLine(g, c.x, c.y, tgt.x, tgt.y, color)
+        drawArrowhead(g, c.x, c.y, tgt.x, tgt.y, color)
         break
       }
       case 'STRIKE': {
-        const tgtUnit = state.units.find((x) => x.id === order.target_id)
-        if (!tgtUnit) break
-        const tgt = centers.get(`${tgtUnit.col},${tgtUnit.row}`)
+        const tgt = centers.get(`${order.target_hex[0]},${order.target_hex[1]}`)
         if (!tgt) break
-        // Solid line + reticle for strikes.
+        // Solid line + reticle for strikes (now hex-targeted).
         g.moveTo(c.x, c.y).lineTo(tgt.x, tgt.y)
           .stroke({ color: 0xFF6B4D, width: 2.5, alpha: 0.9 })
         drawReticle(g, tgt.x, tgt.y, 0xFF6B4D)
         break
       }
+      case 'SCOUT': {
+        // SCOUT is local — drone stays put, reveals around itself.
+        drawScoutHalo(g, c.x, c.y)
+        break
+      }
       case 'OVERWATCH': {
-        // Small shield indicator above the unit.
         drawShield(g, c.x + HEX_SIZE * 0.55, c.y - HEX_SIZE * 0.55, color)
         break
       }
       case 'HOLD':
-        // No visual; HOLD is the default.
         break
     }
   }
@@ -789,18 +750,6 @@ function drawReticle(g: Graphics, cx: number, cy: number, color: number) {
 }
 
 
-function drawFlag(g: Graphics, cx: number, cy: number) {
-  // small flag glyph
-  g.moveTo(cx - 4, cy - 8).lineTo(cx - 4, cy + 8)
-    .stroke({ color: COLORS.amber, width: 1.5 })
-  g.poly([
-    cx - 4, cy - 8,
-    cx + 7, cy - 5,
-    cx - 4, cy - 2,
-  ]).fill({ color: COLORS.amber, alpha: 0.85 })
-}
-
-
 function drawScoutHalo(g: Graphics, cx: number, cy: number) {
   g.poly(hexCorners(cx, cy, HEX_SIZE * 1.5))
     .fill({ color: COLORS.green, alpha: 0.10 })
@@ -855,44 +804,13 @@ function commitTargetingClick(
       return true
     }
     case 'STRIKE': {
-      if (!clickedUnit) return rejectClick('no target on hex', hex, game)
-      if (clickedUnit.side === unit.side) return rejectClick('friendly target', hex, game)
       if (unit.weapon <= 0) return rejectClick('no weapons', hex, game)
-      if (hexDistance(unit.col, unit.row, clickedUnit.col, clickedUnit.row) > unit.weapon)
+      if (hexDistance(unit.col, unit.row, hex.col, hex.row) > unit.weapon)
         return rejectClick('out of weapon range', hex, game)
-      // Engine will silently drop a strike whose target isn't sensed by ANY
-      // friendly unit/base; pre-check the same so the user sees why.
-      const visible = computeFriendlySensorCoverage(game, unit.side)
-      const tgtKey = `${clickedUnit.col},${clickedUnit.row}`
-      if (!visible.has(tgtKey)) {
-        return rejectClick('TARGET NOT SENSED — need a UAV or forward unit', hex, game)
-      }
+      // STRIKE is hex-targeted now: damage applies to every enemy on the hex
+      // after MOVE. Whiff (empty hex) still consumes ammo.
       setOrder({
-        kind: 'STRIKE', unit_id: unit.id, target_id: clickedUnit.id,
-      })
-      return true
-    }
-    case 'SCOUT': {
-      if (unit.sensor <= 0) return rejectClick('no sensors', hex, game)
-      const range = Math.max(1, unit.sensor + 1)
-      if (hexDistance(unit.col, unit.row, hex.col, hex.row) > range + unit.sensor)
-        return rejectClick('scout target too far', hex, game)
-      setOrder({
-        kind: 'SCOUT', unit_id: unit.id, target_hex: [hex.col, hex.row],
-      })
-      return true
-    }
-    case 'CAPTURE': {
-      if (!(unit.domain === 'land' || unit.domain === 'amphib'))
-        return rejectClick('only land units can capture', hex, game)
-      const isObjective = game.map.objective_hexes.some(
-        (o) => o.col === hex.col && o.row === hex.row,
-      )
-      if (!isObjective) return rejectClick('not an objective hex', hex, game)
-      if (hexDistance(unit.col, unit.row, hex.col, hex.row) > 1)
-        return rejectClick('not adjacent to objective', hex, game)
-      setOrder({
-        kind: 'CAPTURE', unit_id: unit.id, target_hex: [hex.col, hex.row],
+        kind: 'STRIKE', unit_id: unit.id, target_hex: [hex.col, hex.row],
       })
       return true
     }

@@ -8,12 +8,12 @@ Orders use a tagged union (pydantic discriminator) keyed by `kind`.
 """
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal, Tuple, Union
 
 from pydantic import BaseModel, Field
 
 
-HexCoord = tuple[int, int]
+HexCoord = Tuple[int, int]
 
 
 class _BaseOrder(BaseModel):
@@ -27,13 +27,17 @@ class MoveOrder(_BaseOrder):
 
 
 class StrikeOrder(_BaseOrder):
+    """Hex-targeted strike. Damage is applied to every enemy unit on the
+    target hex after the MOVE phase. Friendlies in the hex are unaffected.
+    """
     kind: Literal["STRIKE"] = "STRIKE"
-    target_id: str
+    target_hex: HexCoord
 
 
 class ScoutOrder(_BaseOrder):
+    """Drone-only. Unit stays put; reveals every enemy in radius
+    `scout_radius` around its own hex this turn."""
     kind: Literal["SCOUT"] = "SCOUT"
-    target_hex: HexCoord
 
 
 class OverwatchOrder(_BaseOrder):
@@ -44,15 +48,10 @@ class HoldOrder(_BaseOrder):
     kind: Literal["HOLD"] = "HOLD"
 
 
-class CaptureOrder(_BaseOrder):
-    kind: Literal["CAPTURE"] = "CAPTURE"
-    target_hex: HexCoord
-
-
 Order = Annotated[
     Union[
         MoveOrder, StrikeOrder, ScoutOrder,
-        OverwatchOrder, HoldOrder, CaptureOrder,
+        OverwatchOrder, HoldOrder,
     ],
     Field(discriminator="kind"),
 ]

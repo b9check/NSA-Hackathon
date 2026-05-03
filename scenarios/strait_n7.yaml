@@ -1,5 +1,5 @@
 name: "Aegean Archipelago"
-seed: 258966
+seed: 269213
 turn_limit: 30
 
 # 20 cols x 15 rows. Pointy-top, odd-r offset.
@@ -24,38 +24,33 @@ map:
     OOMOOOOOOOOOOOOOOOOO
     OMOMOOOOOOOOMOOOOOOO
     OMPOOOOOOOOOOMOOOOOO
-  objective_hexes:
-    - [8, 9]
-    - [4, 9]
 
 victory:
-  capture_hold_turns: 2
-  combat_power_threshold: 0.6
+  hp_loss_threshold: 0.25
+  turn_cap: 30
 
-# Mobile platforms (auto-placed by scripts/sample_terrain.py per seed).
+# Mobile units (auto-placed by scripts/sample_terrain.py per seed).
 units:
-  - { id: blue-cg47-1         , type: cg47            , pos: [14, 12] }
-  - { id: blue-f35-1          , type: f35a            , pos: [13, 14] }
-  - { id: blue-mq9-1          , type: mq9             , pos: [ 9, 10] }
-  - { id: blue-patriot-1      , type: patriot         , pos: [15,  9] }
-  - { id: blue-m1a2-1         , type: m1a2            , pos: [ 2, 14] }
-  - { id: blue-mech-1         , type: mech_b          , pos: [12, 13] }
-  - { id: blue-mech-2         , type: mech_b          , pos: [14,  9] }
-  - { id: red-type055-1       , type: type055         , pos: [ 5,  6] }
-  - { id: red-j20-1           , type: j20             , pos: [19,  2] }
-  - { id: red-recon-1         , type: recon_uav       , pos: [17,  4] }
-  - { id: red-hq9-1           , type: hq9             , pos: [12,  0] }
-  - { id: red-mech-1          , type: mech_r          , pos: [12,  6] }
-  - { id: red-mech-2          , type: mech_r          , pos: [11,  7] }
-  - { id: red-shahed-1        , type: shahed          , pos: [ 0,  1] }
-  - { id: red-shahed-2        , type: shahed          , pos: [ 2,  2] }
-  - { id: red-shahed-3        , type: shahed          , pos: [ 2,  0] }
+  - { id: blue-destroyer-1        , side: blue , type: destroyer         , pos: [10, 12] }
+  - { id: blue-fighter-1          , side: blue , type: fighter           , pos: [12, 14] }
+  - { id: blue-bomber-1           , side: blue , type: bomber            , pos: [ 0, 14] }
+  - { id: blue-scout_drone-1      , side: blue , type: scout_drone       , pos: [14,  9] }
+  - { id: blue-missile_launcher-1 , side: blue , type: missile_launcher  , pos: [15,  9] }
+  - { id: blue-armor-1            , side: blue , type: armor             , pos: [ 2, 14] }
+  - { id: blue-infantry-1         , side: blue , type: infantry          , pos: [ 9,  8] }
+  - { id: blue-infantry-2         , side: blue , type: infantry          , pos: [11,  8] }
+  - { id: red-destroyer-1         , side: red  , type: destroyer         , pos: [ 5,  5] }
+  - { id: red-fighter-1           , side: red  , type: fighter           , pos: [ 4,  1] }
+  - { id: red-bomber-1            , side: red  , type: bomber            , pos: [18,  2] }
+  - { id: red-scout_drone-1       , side: red  , type: scout_drone       , pos: [ 7,  4] }
+  - { id: red-missile_launcher-1  , side: red  , type: missile_launcher  , pos: [16,  5] }
+  - { id: red-armor-1             , side: red  , type: armor             , pos: [ 0,  1] }
+  - { id: red-infantry-1          , side: red  , type: infantry          , pos: [11,  6] }
+  - { id: red-infantry-2          , side: red  , type: infantry          , pos: [12,  6] }
+  - { id: red-strike_drone-1      , side: red  , type: strike_drone      , pos: [ 7,  0] }
+  - { id: red-strike_drone-2      , side: red  , type: strike_drone      , pos: [ 7,  1] }
 
-# Fixed installations (airbase / naval base / FOB / launch site).
+# One base per side.
 bases:
-  - { id: blue-airbase-1      , type: blue_airbase    , pos: [10,  8] }
-  - { id: blue-navalbase-1    , type: blue_navalbase  , pos: [ 3, 13] }
-  - { id: blue-fob-1          , type: blue_fob        , pos: [ 8,  9] }
-  - { id: red-airbase-1       , type: red_airbase     , pos: [11,  5] }
-  - { id: red-navalbase-1     , type: red_navalbase   , pos: [16,  5] }
-  - { id: red-launchsite-1    , type: red_launchsite  , pos: [ 1,  0] }
+  - { id: blue-base-1             , side: blue , type: base              , pos: [ 2, 12] }
+  - { id: red-base-1              , side: red  , type: base              , pos: [12,  0] }

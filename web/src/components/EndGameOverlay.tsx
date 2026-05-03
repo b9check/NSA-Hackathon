@@ -16,7 +16,6 @@ export function EndGameOverlay() {
   const tagline =
     info.winner === 'draw' ? 'STALEMATE'
     : info.reason === 'annihilation' ? 'TOTAL VICTORY'
-    : info.reason === 'objective_hold' ? 'OBJECTIVES SECURED'
     : info.reason === 'hp_collapse' ? 'FORCE BROKEN'
     : 'TURN CAP REACHED'
 

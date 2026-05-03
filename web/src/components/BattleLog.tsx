@@ -72,27 +72,45 @@ function LogLine({
       </div>
     )
   }
-  if (type === 'strike' || type === 'overwatch_fire') {
+  if (type === 'strike') {
+    const a = ev.attacker as string
+    const hex = ev.target_hex as [number, number]
+    const hits = ev.targets_hit as string[]
+    const whiff = ev.whiffed
+    return (
+      <div className={whiff ? 'text-mute' : 'text-fg'}>
+        {turnTag}
+        <Side side={sideOf(a)} />
+        <span className="text-fg ml-1">{idLookup(a)}</span>
+        <span className="text-mute mx-1">→</span>
+        <span>strike ({hex[0]},{hex[1]})</span>
+        {whiff ? (
+          <span className="ml-2 text-mute">WHIFF (target moved)</span>
+        ) : (
+          <span className="ml-2 text-amber font-semibold">
+            -{ev.damage} HP × {hits.length} target{hits.length === 1 ? '' : 's'}
+          </span>
+        )}
+        {ev.self_destruct && <span className="ml-2 text-red">[SD]</span>}
+        {ev.counter_damage > 0 && (
+          <span className="ml-2 text-mute">cnt -{ev.counter_damage}</span>
+        )}
+      </div>
+    )
+  }
+  if (type === 'overwatch_fire') {
     const a = ev.attacker as string
     const t = ev.target as string
-    const hit = ev.hit
     return (
-      <div className={hit ? 'text-fg' : 'text-mute'}>
+      <div className="text-fg">
         {turnTag}
         <Side side={sideOf(a)} />
         <span className="text-fg ml-1">{idLookup(a)}</span>
         <span className="text-mute mx-1">→</span>
         <Side side={sideOf(t)} />
         <span className="ml-1">{idLookup(t)}</span>
-        <span
-          className={['ml-2 font-semibold', hit ? 'text-amber' : 'text-mute'].join(' ')}
-        >
-          {hit ? `HIT  -${ev.damage} HP` : 'MISS'}
-        </span>
-        <span className="text-mute ml-2">Pk {ev.pkill.toFixed(2)}</span>
-        {type === 'overwatch_fire' && (
-          <span className="text-mute ml-2">[OW]</span>
-        )}
+        <span className="ml-2 font-semibold text-amber">-{ev.damage} HP</span>
+        <span className="text-mute ml-2">[OW]</span>
       </div>
     )
   }
@@ -102,19 +120,6 @@ function LogLine({
         {turnTag}
         <Side side={ev.side} />
         <span className="ml-1">★ {idLookup(ev.entity_id)} destroyed</span>
-      </div>
-    )
-  }
-  if (type === 'capture') {
-    return (
-      <div className="text-amber">
-        {turnTag}
-        <Side side={ev.side} />
-        <span className="ml-1">
-          {ev.controller
-            ? `✓ controls (${ev.hex[0]},${ev.hex[1]})`
-            : `… capturing (${ev.hex[0]},${ev.hex[1]}) ${ev.counter}/${ev.threshold}`}
-        </span>
       </div>
     )
   }
