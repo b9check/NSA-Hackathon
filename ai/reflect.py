@@ -146,7 +146,8 @@ async def reflect_on_game(
     trace = _render_trace(game_log, final_state)
     user_msg = f"## Game trace\n\n{trace}\n\n## Task\n\nDistill 2-4 lessons via the record_lessons tool."
 
-    client = anthropic.AsyncAnthropic()
+    from ai.llm_agent import _get_client
+    client = _get_client()
     try:
         resp = await client.messages.create(
             model=model,

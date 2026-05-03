@@ -190,31 +190,41 @@ def place_units(grid, cols: int, rows: int, seed: int) -> list[dict]:
 
     for side in ("blue", "red"):
         own_half, own_band, own_push = half_filter(side)
-        add(f"{side}-destroyer-1", side, "destroyer", pick(
-            AND(own_half, is_deep),
-            AND(own_half, is_water),
-            is_water,
-        ))
-        add(f"{side}-fighter-1", side, "fighter", pick(
-            own_band, own_half,
-        ))
-        add(f"{side}-bomber-1", side, "bomber", pick(
-            own_band, own_half,
-        ))
-        add(f"{side}-scout_drone-1", side, "scout_drone", pick(
-            own_push, own_half,
-        ))
-        add(f"{side}-missile_launcher-1", side, "missile_launcher", pick(
-            AND(own_half, is_coast, is_settled),
-            AND(own_half, is_coast, is_land),
-            AND(own_half, is_settled),
-            AND(own_half, is_land),
-        ))
-        add(f"{side}-armor-1", side, "armor", pick(
-            AND(own_half, is_settled, not_coastal),
-            AND(own_half, is_settled),
-            AND(own_half, is_land),
-        ))
+        # Doubled roster: 2x each platform, 4x infantry. Fits 18 units per
+        # side on the standard 20x15 map without crowding.
+        for n in (1, 2):
+            add(f"{side}-destroyer-{n}", side, "destroyer", pick(
+                AND(own_half, is_deep),
+                AND(own_half, is_water),
+                is_water,
+            ))
+            add(f"{side}-fighter-{n}", side, "fighter", pick(
+                own_band, own_half,
+            ))
+            add(f"{side}-bomber-{n}", side, "bomber", pick(
+                own_band, own_half,
+            ))
+            add(f"{side}-scout_drone-{n}", side, "scout_drone", pick(
+                own_push, own_half,
+            ))
+            add(f"{side}-missile_launcher-{n}", side, "missile_launcher", pick(
+                AND(own_half, is_coast, is_settled),
+                AND(own_half, is_coast, is_land),
+                AND(own_half, is_settled),
+                AND(own_half, is_land),
+            ))
+            add(f"{side}-armor-{n}", side, "armor", pick(
+                AND(own_half, is_settled, not_coastal),
+                AND(own_half, is_settled),
+                AND(own_half, is_land),
+            ))
+            add(f"{side}-strike_drone-{n}", side, "strike_drone", pick(
+                AND(own_band, is_land),
+                own_band, own_half,
+            ))
+        # 4 infantry per side: two near the first anchor, two anywhere on
+        # own half. Spread over a wider footprint so the side has multiple
+        # land prongs rather than one stack.
         inf_anchor = pick(
             AND(own_half, is_coast, is_land),
             AND(own_half, is_land),
@@ -225,11 +235,13 @@ def place_units(grid, cols: int, rows: int, seed: int) -> list[dict]:
             AND(own_half, near(inf_anchor, 4), is_land),
             AND(own_half, is_land),
         ))
-        # Single strike-drone in the rear — a kamikaze threat each side
-        # has to scout for.
-        add(f"{side}-strike_drone-1", side, "strike_drone", pick(
-            AND(own_band, is_land),
-            own_band, own_half,
+        add(f"{side}-infantry-3", side, "infantry", pick(
+            AND(own_half, is_coast, is_land),
+            AND(own_half, is_land),
+        ))
+        add(f"{side}-infantry-4", side, "infantry", pick(
+            AND(own_half, is_settled),
+            AND(own_half, is_land),
         ))
 
     return [u for u in units if u["pos"] is not None]

@@ -55,6 +55,8 @@ export function TurnBar() {
   const runAIGame = useStore((s) => s.runAIGame)
   const aiGameAutoplay = useStore((s) => s.aiGameAutoplay)
   const aiGameTurnCount = useStore((s) => s.aiGameTurnCount)
+  const placementActive = useStore((s) => s.placementActive)
+  const endPlacement = useStore((s) => s.endPlacement)
 
   if (!game || !turnInfo) {
     return (
@@ -138,14 +140,19 @@ export function TurnBar() {
         />
       )}
 
+      {placementActive && <PlacementBadge />}
+
       <div className="flex-1" />
 
-      <EndGameButton />
+      {!placementActive && <EndGameButton />}
 
       {/* Action area:
+          - PLACEMENT:      [READY]
           - BOTH AI:        [RUN AI TURN] [RUN AI GAME] (or AUTOPLAY status)
           - mixed/manual:   [RESOLVE TURN] (existing) */}
-      {controllers.blue !== 'manual' && controllers.red !== 'manual' ? (
+      {placementActive ? (
+        <ReadyButton onReady={endPlacement} />
+      ) : controllers.blue !== 'manual' && controllers.red !== 'manual' ? (
         aiGameAutoplay ? (
           <AutoPlayStatus turnCount={aiGameTurnCount} />
         ) : (
@@ -174,6 +181,40 @@ export function TurnBar() {
         </button>
       )}
     </div>
+  )
+}
+
+
+function PlacementBadge() {
+  return (
+    <div
+      title="Drag your units onto starting hexes in your half of the map."
+      className={[
+        'h-7 px-3 inline-flex items-center gap-2 rounded-sm border',
+        'border-amber/60 text-amber bg-amber/10',
+        'font-mono text-[10px] tracking-widest',
+      ].join(' ')}
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-amber animate-pulse" />
+      PLACEMENT · DRAG YOUR UNITS
+    </div>
+  )
+}
+
+
+function ReadyButton({ onReady }: { onReady: () => Promise<void> | void }) {
+  return (
+    <button
+      onClick={() => onReady()}
+      title="Lock in your starting positions and begin the match"
+      className={[
+        'h-8 px-4 rounded-sm border tracking-widest text-[11px] font-mono',
+        'border-amber text-amber bg-amber/10 hover:bg-amber/20 animate-pulse',
+        'transition-colors',
+      ].join(' ')}
+    >
+      READY
+    </button>
   )
 }
 

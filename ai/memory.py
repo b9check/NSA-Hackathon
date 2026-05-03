@@ -7,6 +7,7 @@ Up to 100 lessons; oldest get archived when over cap.
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -17,7 +18,22 @@ from typing import Any, Dict, List, Optional
 # Repo-root-relative paths — match the AI_CONTROL.md spec.
 ROOT = Path(__file__).resolve().parent.parent
 MEMORY_DIR = ROOT / "memory"
-LESSONS_PATH = MEMORY_DIR / "lessons.jsonl"
+
+
+def _resolve_lessons_path() -> Path:
+    """Path to the lessons file. AI_MEMORY_PATH overrides for harness runs
+    so we can target a frozen snapshot or an empty file without touching
+    the live store. Read fresh each call so harnesses can `os.environ[]=`
+    after import."""
+    p = os.environ.get("AI_MEMORY_PATH")
+    if p:
+        return Path(p)
+    return MEMORY_DIR / "lessons.jsonl"
+
+
+# Back-compat: callers that imported LESSONS_PATH at module load still work
+# (live server path); harnesses use _resolve_lessons_path() inside functions.
+LESSONS_PATH = _resolve_lessons_path()
 
 # Hard cap on lessons; oldest beyond this are dropped.
 MAX_LESSONS = 100
@@ -76,10 +92,11 @@ class Lesson:
 
 def load_lessons() -> List[Lesson]:
     """Read all lessons from the jsonl file. Returns [] if file is missing."""
-    if not LESSONS_PATH.exists():
+    path = _resolve_lessons_path()
+    if not path.exists():
         return []
     out: List[Lesson] = []
-    for line in LESSONS_PATH.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -96,16 +113,16 @@ def append_lessons(lessons: List[Lesson]) -> None:
     missing. Enforces MAX_LESSONS by dropping oldest after append."""
     if not lessons:
         return
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    # Append efficiently; rewrite if we trim.
-    with LESSONS_PATH.open("a", encoding="utf-8") as f:
+    path = _resolve_lessons_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
         for ln in lessons:
             f.write(ln.to_jsonl() + "\n")
     # Cap enforcement.
     all_lessons = load_lessons()
     if len(all_lessons) > MAX_LESSONS:
         keep = sorted(all_lessons, key=lambda x: x.created_ts)[-MAX_LESSONS:]
-        LESSONS_PATH.write_text(
+        path.write_text(
             "\n".join(l.to_jsonl() for l in keep) + "\n", encoding="utf-8",
         )
 

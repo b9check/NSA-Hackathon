@@ -8,15 +8,20 @@ Usage:
     python3 scripts/setup_region.py custom --lat LAT --lng LNG \\
                                             --zoom Z --name "Display"
 
+Curated regions: each one has BOTH significant water and land bridging
+the dividing line, so neither side is forced into a single domain
+(navy or land) the way pure-archipelago maps do. Galician is the
+reference standard.
+
 Available named regions (see REGIONS dict below):
-    bonifacio   - Bonifacio Strait (Corsica / Sardinia, Mediterranean)
-    aegean      - Cyclades archipelago, Greece
-    hawaii      - Maui / Lanai / Molokai channel
-    solomon     - Solomon Islands central
-    faroe       - Faroe Islands, North Atlantic
-    aleutian    - Central Aleutian Islands
-    cook        - Cook Strait (NZ North/South islands)
-    galicia     - Galician rias, NW Spain
+    galicia     - Galician rias, NW Spain (reference)
+    bosphorus   - Bosphorus & Sea of Marmara (Istanbul)
+    oresund     - Øresund Crossing (Denmark / Sweden)
+    brittany    - Brittany Approach, Brest peninsula (France)
+    bergen      - Bergen Fjords / Hardangerfjord (Norway)
+    severn      - Severn Approach / Bristol Channel (UK)
+    chesapeake  - Chesapeake Bay / Hampton Roads (USA)
+    trieste     - Adriatic Head / Trieste-Istria (IT/SI/HR)
 """
 from __future__ import annotations
 
@@ -27,22 +32,39 @@ from pathlib import Path
 
 
 REGIONS: dict[str, dict] = {
-    "bonifacio": dict(lat=41.30, lng=9.20,    zoom=11,
-                      name="Bonifacio Strait"),
-    "aegean":    dict(lat=37.00, lng=25.00,   zoom=10,
-                      name="Aegean Archipelago"),
-    "hawaii":    dict(lat=20.95, lng=-156.70, zoom=11,
-                      name="Maui-Lanai Channel"),
-    "solomon":   dict(lat=-9.50, lng=159.50,  zoom=10,
-                      name="Solomon Sea"),
-    "faroe":     dict(lat=62.00, lng=-7.00,   zoom=10,
-                      name="Faroe Approach"),
-    "aleutian":  dict(lat=52.50, lng=-174.00, zoom=9,
-                      name="Aleutian Strait"),
-    "cook":      dict(lat=-41.30, lng=174.50, zoom=10,
-                      name="Cook Strait"),
-    "galicia":   dict(lat=42.60, lng=-8.90,   zoom=10,
-                      name="Galician Approach"),
+    # Reference standard: rias-style coastline carved into one continuous
+    # landmass — both sides reachable by ground AND by sea.
+    "galicia":    dict(lat=42.60, lng=-8.90,   zoom=10,
+                       name="Galician Approach"),
+    # Bosphorus + Sea of Marmara around Istanbul — narrow strait with
+    # heavily built-up land each side and a wider sea south of it.
+    "bosphorus":  dict(lat=41.05, lng=29.05,   zoom=10,
+                       name="Bosphorus Strait"),
+    # Øresund: Sjælland <-> Skåne, narrow sound, mainland on each shore.
+    "oresund":    dict(lat=55.85, lng=12.85,   zoom=10,
+                       name="Øresund Crossing"),
+    # Brittany — Brest peninsula. Rade de Brest + Douarnenez Bay carve
+    # deep water inlets into a single connected landmass. Galicia twin.
+    "brittany":   dict(lat=48.30, lng=-4.40,   zoom=10,
+                       name="Brittany Approach"),
+    # Bergen / Hardangerfjord — Norwegian Vestlandet fjord coast. The
+    # mainland threads continuously between every fjord arm.
+    "bergen":     dict(lat=60.30, lng=5.30,    zoom=10,
+                       name="Bergen Fjords"),
+    # Severn Estuary / Bristol Channel — UK mainland north and south,
+    # estuary cuts inland. Both shores ground-connected via Britain.
+    "severn":     dict(lat=51.35, lng=-3.30,   zoom=9,
+                       name="Severn Approach"),
+    # Chesapeake Bay around Hampton Roads — large inland bay with
+    # mainland Virginia on the west and the Delmarva peninsula east,
+    # with the Bay Bridge-Tunnel implied as a notional land tie.
+    "chesapeake": dict(lat=37.00, lng=-76.10,  zoom=10,
+                       name="Chesapeake Bay"),
+    # Trieste / Istria — head of the Adriatic. Italian, Slovenian and
+    # Croatian mainland on three sides of a shallow gulf, all
+    # land-connected through the hinterland.
+    "trieste":    dict(lat=45.40, lng=13.50,   zoom=10,
+                       name="Adriatic Head"),
 }
 
 

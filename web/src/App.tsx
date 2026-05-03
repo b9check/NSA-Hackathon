@@ -4,6 +4,7 @@ import { MapStage } from './components/MapStage'
 import { TopBar, RightRail } from './components/HUD'
 import { ReasoningPanel } from './components/ReasoningPanel'
 import { LessonsDrawer } from './components/LessonsDrawer'
+import { PlacementDrawer } from './components/PlacementDrawer'
 import { TurnBar } from './components/TurnBar'
 import { EndGameOverlay } from './components/EndGameOverlay'
 import { BattleLog } from './components/BattleLog'
@@ -134,7 +135,7 @@ export default function App() {
         </div>
         <div className="w-[360px] flex flex-col h-full min-h-0">
           <div className="flex-1 min-h-0">
-            <RightRail />
+            <RightRailOrPlacement />
           </div>
           <ReasoningPanel />
         </div>
@@ -147,6 +148,15 @@ export default function App() {
     </div>
   )
 }
+
+function RightRailOrPlacement() {
+  const placementActive = useStore((s) => s.placementActive)
+  const controllers = useStore((s) => s.controllers)
+  const anyManual = controllers.blue === 'manual' || controllers.red === 'manual'
+  if (placementActive && anyManual) return <PlacementDrawer />
+  return <RightRail />
+}
+
 
 function HotseatPovBanner() {
   const hr = useStore((s) => s.hotseatReplay)

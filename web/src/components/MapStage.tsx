@@ -106,6 +106,32 @@ async function buildPixi(
   // Bind the global tween module to this Pixi app so animation primitives
   // can drive off the same ticker (and pause when the app does).
   bindApp(app)
+
+  // Native HTML5 drop target: PlacementDrawer cards are HTML elements outside
+  // the Pixi tree, so they can't fire pointer events on the stage. Hook the
+  // canvas DOM directly so a drag-from-drawer drop lands as a placement move.
+  const onDragOver = (ev: DragEvent) => {
+    const st = useStore.getState()
+    if (!st.placementActive) return
+    if (!ev.dataTransfer?.types?.includes('application/x-unit-id')) return
+    ev.preventDefault() // required to allow drop
+    ev.dataTransfer!.dropEffect = 'move'
+  }
+  const onDrop = async (ev: DragEvent) => {
+    const st = useStore.getState()
+    if (!st.placementActive) return
+    const unitId = ev.dataTransfer?.getData('application/x-unit-id')
+    if (!unitId) return
+    ev.preventDefault()
+    const rect = app.canvas.getBoundingClientRect()
+    const mx = ev.clientX - rect.left
+    const my = ev.clientY - rect.top
+    const hex = findHexAtPixel(mx, my)
+    if (!hex) return
+    await useStore.getState().placeUnit(unitId, [hex.col, hex.row])
+  }
+  app.canvas.addEventListener('dragover', onDragOver)
+  app.canvas.addEventListener('drop', onDrop)
   // Preload the unit + base icon textures before any redraw so the very
   // first reconcile populates Sprites instead of fallback Graphics.
   await loadIcons()
@@ -181,6 +207,12 @@ async function buildPixi(
 
   app.stage.eventMode = 'static'
   app.stage.hitArea = app.screen
+
+  // Drag state for placement-phase unit relocation. Lives in the closure
+  // so we don't have to thread it through React state.
+  let dragUnitId: string | null = null
+  let dragOriginHex: { col: number; row: number } | null = null
+
   app.stage.on('pointermove', (e: FederatedPointerEvent) => {
     const hex = findHexAtPixel(e.global.x, e.global.y)
     onHover(hex)
@@ -191,10 +223,18 @@ async function buildPixi(
         .poly(hexCorners(c.x, c.y))
         .stroke({ color: COLORS.fg, width: 1.5, alpha: 0.55 })
     }
+    // Drag preview: while dragging a unit, follow the cursor.
+    if (dragUnitId) {
+      const node = unitNodes.get(dragUnitId)
+      if (node) {
+        node.container.x = (e.global.x - PAD_X)
+        node.container.y = (e.global.y - PAD_Y)
+        node.container.alpha = 0.7
+      }
+    }
   })
+
   app.stage.on('pointerdown', (e: FederatedPointerEvent) => {
-    // Ignore clicks while the replay is mid-flight or settling — game
-    // state can be transiently out of sync with the rendered sprites.
     const st = useStore.getState()
     if (st.replaying || st.resolving) return
     const hex = findHexAtPixel(e.global.x, e.global.y)
@@ -202,11 +242,49 @@ async function buildPixi(
       onPointerDown(null, null)
       return
     }
-    // Read the LIVE game state, not the captured initialGame.
     const liveGame = st.game
     const units = liveGame ? liveGame.units : state.units
     const u = units.find((u) => u.col === hex.col && u.row === hex.row)
+
+    // Placement drag: if placement is active and the clicked unit is
+    // on a manual side, start a drag instead of the normal click flow.
+    if (st.placementActive && u && st.controllers[u.side as 'blue' | 'red'] === 'manual') {
+      dragUnitId = u.id
+      dragOriginHex = { col: hex.col, row: hex.row }
+      const node = unitNodes.get(u.id)
+      if (node) node.container.alpha = 0.7
+      return
+    }
+
     onPointerDown(hex, u ?? null)
+  })
+
+  app.stage.on('pointerup', async (e: FederatedPointerEvent) => {
+    if (!dragUnitId) return
+    const uid = dragUnitId
+    const origin = dragOriginHex
+    const node = unitNodes.get(uid)
+    if (node) node.container.alpha = 1
+    dragUnitId = null
+    dragOriginHex = null
+    const dropHex = findHexAtPixel(e.global.x, e.global.y)
+    if (!dropHex || (origin && dropHex.col === origin.col && dropHex.row === origin.row)) {
+      // Cancel — snap back via redraw effect on next state read.
+      if (origin && node) {
+        const c = cellCenters.get(`${origin.col},${origin.row}`)
+        if (c) { node.container.x = c.x; node.container.y = c.y }
+      }
+      return
+    }
+    // Optimistically snap node to drop hex; server validates and refetch
+    // confirms or reverts.
+    const c = cellCenters.get(`${dropHex.col},${dropHex.row}`)
+    if (c && node) { node.container.x = c.x; node.container.y = c.y }
+    const ok = await useStore.getState().placeUnit(uid, [dropHex.col, dropHex.row])
+    if (!ok && origin && node) {
+      const back = cellCenters.get(`${origin.col},${origin.row}`)
+      if (back) { node.container.x = back.x; node.container.y = back.y }
+    }
   })
 
   // ---- Selection / overlays / orders ----
@@ -243,6 +321,14 @@ async function buildPixi(
       ? s.units.find((u) => u.id === selectedUnitId)
       : null
 
+    const placement = useStore.getState().placementActive
+    const controllers = useStore.getState().controllers
+    const manualSides = new Set<'blue' | 'red'>()
+    if (controllers.blue === 'manual') manualSides.add('blue')
+    if (controllers.red === 'manual') manualSides.add('red')
+    // Honor the user-selected POV directly. Pre-first-move enforcement
+    // (no enemy reveals before the first resolve) is applied below in
+    // the unit/base filters, so we don't need to fake a side-view here.
     const visibleHexes = computeVisibleHexes(s, viewMode)
     const sideView = viewMode !== 'omniscient'
 
@@ -257,10 +343,23 @@ async function buildPixi(
       drawWeaponRing(overlay, selected, cellCenters)
     }
 
+    // Placement hint: tint each manual side's own half in that side's
+    // color (boundary derived from base centroids). Hot-seat / single-
+    // side placement both fall out naturally — one tint per manual side.
+    if (placement) {
+      for (const ms of manualSides) {
+        drawOwnHalf(overlay, s, ms, cellCenters)
+      }
+    }
+
     // ---- LKP memory bookkeeping (only meaningful in side views) ----
-    if (sideView) {
-      const enemy = viewMode === 'blue' ? 'red' : 'blue'
-      const myMap = lastSeen[viewMode]
+    // Skip during pre-first-move: enemies are force-hidden so we shouldn't
+    // be quietly recording their positions for later "ghost" rendering.
+    const preFirstMoveLkp = s.turn === 0
+    if (sideView && !preFirstMoveLkp) {
+      const sideKey = viewMode as 'blue' | 'red'
+      const enemy = sideKey === 'blue' ? 'red' : 'blue'
+      const myMap = lastSeen[sideKey]
       // Update from currently-visible enemies (units + bases).
       for (const u of s.units) {
         if (u.side !== enemy) continue
@@ -301,13 +400,34 @@ async function buildPixi(
     }
 
     // ---- Reconcile units + bases (per-id Containers) ----
+    // Pre-first-move (turn 0): no enemy reveals before the first resolve,
+    // even via fog/sensors. The user's POV still shows their own side's
+    // entities — including AI/random-deployed ones — so switching to a
+    // BLUE or RED view at game start always shows that side's roster.
+    //
+    //   - side view (BLUE/RED) → show only that side's stuff
+    //   - OMNI                 → show only manual-side stuff (no peeking
+    //                            at AI deployments before the first turn)
+    //   - AI-vs-AI OMNI        → no units visible at all; bases still
+    //                            show as map landmarks for the spectator
+    const preFirstMove = s.turn === 0
+    const ownSidePreFirst = (entitySide: 'blue' | 'red') => {
+      if (sideView) return entitySide === viewMode
+      return manualSides.has(entitySide)
+    }
     syncBases(baseHost, s, (b) => {
+      if (preFirstMove) {
+        // AI-vs-AI spectator: keep both bases visible as landmarks.
+        if (!sideView && manualSides.size === 0) return true
+        return ownSidePreFirst(b.side as 'blue' | 'red')
+      }
       if (!sideView) return true
       if (b.side === viewMode) return true
       return visibleHexes.has(`${b.col},${b.row}`)
     }, baseNodes)
 
     syncUnits(unitHost, s, (u) => {
+      if (preFirstMove) return ownSidePreFirst(u.side as 'blue' | 'red')
       if (!sideView) return true
       if (u.side === viewMode) return true
       return visibleHexes.has(`${u.col},${u.row}`)
@@ -581,6 +701,42 @@ async function buildPixi(
 }
 
 // ---------------- Drawing helpers ----------------
+
+function drawOwnHalf(
+  g: Graphics,
+  state: GameState,
+  side: 'blue' | 'red',
+  centers: Map<string, { x: number; y: number; cell: HexCell }>,
+) {
+  // Tint every hex on `side`'s half — boundary = perpendicular bisector
+  // of the segment between blue and red base centroids. Mirrors the
+  // server's `_in_own_half` so the visual matches what the API allows.
+  const bluePts = (state.bases ?? []).filter((b) => b.side === 'blue')
+  const redPts = (state.bases ?? []).filter((b) => b.side === 'red')
+  if (bluePts.length === 0 || redPts.length === 0) return
+  const avg = (arr: typeof bluePts) => ({
+    x: arr.reduce((s, b) => s + b.col, 0) / arr.length,
+    y: arr.reduce((s, b) => s + b.row, 0) / arr.length,
+  })
+  const blueC = avg(bluePts)
+  const redC = avg(redPts)
+  const mx = (blueC.x + redC.x) / 2
+  const my = (blueC.y + redC.y) / 2
+  const vx = redC.x - blueC.x
+  const vy = redC.y - blueC.y
+  const tint = side === 'blue' ? COLORS.blue : COLORS.red
+  for (const cell of state.map.cells) {
+    const dot = (cell.col - mx) * vx + (cell.row - my) * vy
+    const onMyHalf = side === 'blue' ? dot <= 0 : dot >= 0
+    if (!onMyHalf) continue
+    const c = centers.get(`${cell.col},${cell.row}`)
+    if (!c) continue
+    g.poly(hexCorners(c.x, c.y, HEX_SIZE * 0.97))
+      .fill({ color: tint, alpha: 0.08 })
+      .stroke({ color: tint, width: 0.6, alpha: 0.22 })
+  }
+}
+
 
 function drawHexGrid(
   layer: Container,
@@ -1100,11 +1256,12 @@ export function MapStage() {
   // redraw on selection / state / view-mode change OR pending-order change.
   const pendingOrdersHash = useStore((s) => JSON.stringify(s.pendingOrders))
   const replaying = useStore((s) => s.replaying)
+  const placementActive = useStore((s) => s.placementActive)
   useEffect(() => {
     if (!handlesRef.current || !game) return
     if (replaying) return // suppress reconcile during animation playback
     handlesRef.current.redraw(game, selectedUnitId, viewMode)
-  }, [game, selectedUnitId, viewMode, pendingOrdersHash, replaying])
+  }, [game, selectedUnitId, viewMode, pendingOrdersHash, replaying, placementActive])
 
   // Replay any events queued by /api/resolve.
   const pendingEvents = useStore((s) => s.pendingEvents)

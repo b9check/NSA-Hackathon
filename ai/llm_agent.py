@@ -35,10 +35,41 @@ DEFAULT_MODEL = "claude-sonnet-4-6"
 FALLBACK_MODEL = "claude-haiku-4-5"
 
 
+# Module-level singleton: anthropic.AsyncAnthropic wraps an httpx.AsyncClient
+# with a connection pool. Per-call instantiation leaks CLOSE_WAIT sockets
+# and chokes the event loop after a few dozen calls (caught during a 20-game
+# self-play run). Reuse one client for the whole process.
+_SHARED_CLIENT: Optional[anthropic.AsyncAnthropic] = None
+
+
+def _get_client() -> anthropic.AsyncAnthropic:
+    global _SHARED_CLIENT
+    if _SHARED_CLIENT is None:
+        _SHARED_CLIENT = anthropic.AsyncAnthropic()
+    return _SHARED_CLIENT
+
+
+async def reset_client() -> None:
+    """Force a fresh client. Some long-lived runs accumulate stale
+    httpx connections that the SDK doesn't reap; harnesses call this
+    between games as a belt-and-suspenders safety net."""
+    global _SHARED_CLIENT
+    if _SHARED_CLIENT is not None:
+        try:
+            await _SHARED_CLIENT.close()
+        except Exception:
+            pass
+        _SHARED_CLIENT = None
+
+
 @register_controller("llm")
 class LLMController(Controller):
     """Claude-driven controller. Uses tool-use to constrain output to our
     LLMTurnPlan schema."""
+
+    # Subclass overrides to true to skip lesson retrieval entirely
+    # (used by the A/B harness to compare with-memory vs no-memory).
+    memory_off: bool = False
 
     def __init__(
         self,
@@ -47,9 +78,8 @@ class LLMController(Controller):
     ) -> None:
         self.model = model
         self.max_tokens = max_tokens
-        # Anthropic() reads ANTHROPIC_API_KEY from os.environ. Server already
-        # loaded .env at boot.
-        self._client = anthropic.AsyncAnthropic()
+        # Reuse the module-level client to avoid per-turn connection leaks.
+        self._client = _get_client()
 
     async def decide(self, state: GameState, side: str) -> ControllerResult:
         own_unit_ids = [u.id for u in state.units if u.side == side]
@@ -57,9 +87,11 @@ class LLMController(Controller):
             return [], {"summary": "no controllable units", "decisions": []}
 
         menus = build_menus(state, side)
-        # Retrieve recent lessons from memory.jsonl. v1 retrieval =
-        # most-recent-K; smarter scoring is a Phase C+ refinement.
-        lessons = top_k(load_lessons(), k=5)
+        # Retrieve recent lessons unless this is the no-memory ablation.
+        if self.memory_off:
+            lessons = []
+        else:
+            lessons = top_k(load_lessons(), k=5)
         user_msg = render_user_message(state, side, menus, lessons=lessons)
 
         # Single tool-use call. Cache the system prompt so turn N+1 hits the
@@ -218,3 +250,10 @@ def _usage_dict(response: anthropic.types.Message) -> Dict[str, Any]:
         "cache_read": getattr(u, "cache_read_input_tokens", 0),
         "cache_create": getattr(u, "cache_creation_input_tokens", 0),
     }
+
+
+@register_controller("llm-no-memory")
+class LLMNoMemoryController(LLMController):
+    """A/B-test variant: identical to LLMController but skips lesson
+    retrieval. Same model, same prompt scaffolding, just `lessons=[]`."""
+    memory_off: bool = True

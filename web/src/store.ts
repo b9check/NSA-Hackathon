@@ -112,6 +112,23 @@ interface AppState {
    *  the overlay every render. Cleared on reroll/swap/replay. */
   gameOverDismissed: boolean
   dismissGameOver: () => void
+
+  /** Placement phase: true at game start; players can drag-place their own
+   *  units before turn 1. Cleared by endPlacement() or auto-cleared when
+   *  no side is manual. */
+  placementActive: boolean
+  /** Manual-side units that haven't been dropped onto the board yet. The
+   *  PlacementDrawer renders these as draggable cards. */
+  placementStashed: { blue: UnitInstance[]; red: UnitInstance[] }
+  /** Last server-rejection message for a placement attempt. Surfaced as
+   *  a transient toast near the cursor / drawer. */
+  placementError: string | null
+  placementErrorTs: number | null
+  refetchPlacement: () => Promise<void>
+  /** Move one of your units to (col, row) during placement. Validates
+   *  on the server (own half, terrain, occupancy). */
+  placeUnit: (unitId: string, target: [number, number]) => Promise<boolean>
+  endPlacement: () => Promise<void>
   /** End the current game (force-forfeit if no winner yet) + run the
    *  reflect pass to extract lessons into the memory store. */
   endGameAndReflect: (opts?: { force?: boolean }) => Promise<void>
@@ -205,7 +222,18 @@ async function _waitUntilIdle(getStore: () => AppState, hardCapMs = 90_000): Pro
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init)
-  if (!r.ok) throw new Error(`${url} -> HTTP ${r.status}`)
+  if (!r.ok) {
+    let detail = ''
+    try {
+      const j = await r.clone().json()
+      if (j && typeof j.detail === 'string') detail = j.detail
+    } catch { /* body wasn't JSON */ }
+    const msg = detail ? `${detail}` : `${url} -> HTTP ${r.status}`
+    const err = new Error(msg) as Error & { status?: number; detail?: string }
+    err.status = r.status
+    err.detail = detail
+    throw err
+  }
   return (await r.json()) as T
 }
 
@@ -267,6 +295,10 @@ export const useStore = create<AppState>((set, get) => ({
   aiGameAutoplay: false,
   aiGameTurnCount: 0,
   gameOverDismissed: false,
+  placementActive: true,        // assume placement at boot; refetch corrects
+  placementStashed: { blue: [], red: [] },
+  placementError: null,
+  placementErrorTs: null,
   lastLessons: [],
   reflecting: false,
   showLessonsDrawer: false,
@@ -393,6 +425,11 @@ export const useStore = create<AppState>((set, get) => ({
       )
       // Mirror server truth.
       set({ controllers: { ...get().controllers, ...r.controllers } })
+      // Toggling a side stashes/un-stashes its roster server-side, so
+      // both placement state and the canonical state.units may have
+      // shifted. Refetch both.
+      await get().refetchPlacement()
+      await get().refetchState()
     } catch (e) {
       console.error('setController failed', e)
     }
@@ -429,6 +466,67 @@ export const useStore = create<AppState>((set, get) => ({
   dismissLessonsDrawer: () => set({ showLessonsDrawer: false }),
 
   dismissGameOver: () => set({ gameOver: null, gameOverDismissed: true }),
+
+  refetchPlacement: async () => {
+    try {
+      const r = await fetchJson<{
+        active: boolean
+        stashed?: { blue?: UnitInstance[]; red?: UnitInstance[] }
+      }>('/api/placement/state')
+      set({
+        placementActive: !!r.active,
+        placementStashed: {
+          blue: r.stashed?.blue ?? [],
+          red: r.stashed?.red ?? [],
+        },
+      })
+    } catch {
+      set({ placementActive: false, placementStashed: { blue: [], red: [] } })
+    }
+  },
+
+  placeUnit: async (unitId, target) => {
+    try {
+      await fetchJson('/api/placement/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unit_id: unitId, target_hex: target }),
+      })
+      await get().refetchState()
+      await get().refetchPlacement()
+      return true
+    } catch (e: any) {
+      console.warn('placeUnit rejected', e)
+      const msg = e?.detail || e?.message || 'placement rejected'
+      set({ placementError: msg, placementErrorTs: Date.now() })
+      return false
+    }
+  },
+
+  endPlacement: async () => {
+    // Pre-check client-side so we can give a useful message instead
+    // of a bare "HTTP 409".
+    const { controllers, placementStashed } = get()
+    const remaining: string[] = []
+    for (const side of ['blue', 'red'] as const) {
+      if (controllers[side] === 'manual' && (placementStashed[side]?.length ?? 0) > 0) {
+        remaining.push(`${side.toUpperCase()} has ${placementStashed[side].length} unplaced`)
+      }
+    }
+    if (remaining.length) {
+      if (typeof window !== 'undefined') {
+        window.alert(`Can't lock in yet — ${remaining.join('; ')}.`)
+      }
+      return
+    }
+    try {
+      await fetchJson('/api/placement/end', { method: 'POST' })
+      set({ placementActive: false })
+      await get().refetchTurn()
+    } catch (e) {
+      console.error('endPlacement failed', e)
+    }
+  },
 
   playSideWithAI: async (side) => {
     set((s) => ({ aiThinking: { ...s.aiThinking, [side]: true } }))
@@ -540,6 +638,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
     set(next as any)
     get().refetchTurn().catch(() => {})
+    get().refetchPlacement().catch(() => {})
   },
 
   refetchTurn: async () => {

@@ -101,12 +101,218 @@ _session: dict = {
     "last_lessons": [],
     # Auto-incrementing game id for traceability in the lessons store.
     "current_game_id": "game_init",
+    # Placement phase: True at game start; players can drag their own
+    # units to new starting hexes. Cleared by POST /api/placement/end
+    # (or auto-cleared when no side is manual). While True, /api/orders
+    # and /api/resolve are blocked.
+    "placement_phase": True,
+    # Manual-side units that haven't been dropped onto a hex yet. Each
+    # entry is a UnitInstance.model_dump(); on placement_move we pop
+    # one out and append it (with new col/row) into state.units. The
+    # board therefore renders ONLY units that have been placed (or that
+    # belong to a side an AI/random controller is driving).
+    "stashed_units": {"blue": [], "red": []},
+    # Original (col, row) for every unit at scenario-load time. Used
+    # to restore an AI side to its default spawn hex when a controller
+    # toggles back from manual to non-manual.
+    "default_unit_hex": {},
 }
 
 
+def _snapshot_default_hexes() -> None:
+    """Capture each unit's default (col, row) right after scenario load."""
+    state = _ensure_state()
+    _session["default_unit_hex"] = {
+        u.id: (u.col, u.row) for u in state.units
+    }
+
+
+def _stash_side(side: str) -> None:
+    """Pull every unit belonging to `side` off the board into the stash.
+    Idempotent — a side already fully stashed stays stashed."""
+    state = _ensure_state()
+    bucket = _session.setdefault(
+        "stashed_units", {"blue": [], "red": []},
+    ).setdefault(side, [])
+    keep = []
+    for u in state.units:
+        if u.side == side:
+            bucket.append(u.model_dump(mode="json"))
+        else:
+            keep.append(u)
+    state.units = keep
+
+
+def _in_own_half(side: str, state: GameState, tc: int, tr: int) -> bool:
+    """True iff the target hex is on `side`'s half of the map. The
+    boundary is the perpendicular bisector of the segment joining the
+    blue base centroid and the red base centroid — so it works for any
+    orientation (north/south, east/west, diagonal). On the boundary
+    line both sides are accepted (tie goes to the placer)."""
+    blue_centroid: Optional[tuple[float, float]] = None
+    red_centroid: Optional[tuple[float, float]] = None
+    blue_pts = [(b.col, b.row) for b in (state.bases or []) if b.side == "blue"]
+    red_pts = [(b.col, b.row) for b in (state.bases or []) if b.side == "red"]
+    if blue_pts:
+        blue_centroid = (
+            sum(c for c, _ in blue_pts) / len(blue_pts),
+            sum(r for _, r in blue_pts) / len(blue_pts),
+        )
+    if red_pts:
+        red_centroid = (
+            sum(c for c, _ in red_pts) / len(red_pts),
+            sum(r for _, r in red_pts) / len(red_pts),
+        )
+    if blue_centroid is None or red_centroid is None:
+        # No bases yet for one side -> no constraint we can enforce.
+        return True
+    bx, by = blue_centroid
+    rx, ry = red_centroid
+    mx, my = (bx + rx) / 2, (by + ry) / 2
+    # Vector pointing from blue toward red.
+    vx, vy = rx - bx, ry - by
+    # Sign of (target - midpoint) . (red - blue):
+    #   <= 0 -> on blue's side  (closer to blue centroid)
+    #   >= 0 -> on red's side
+    dot = (tc - mx) * vx + (tr - my) * vy
+    if side == "blue":
+        return dot <= 0.0
+    return dot >= 0.0
+
+
+def _exposed_hexes(state: GameState) -> set:
+    """Union of every manual side's sensor footprint (bases + already-
+    placed units). AI auto-deploy avoids these hexes so the AI roster
+    isn't pre-revealed before turn 1."""
+    from engine.hex import Hex, hex_range
+    out: set = set()
+    cols, rows = state.map.cols, state.map.rows
+    manual_sides = {
+        s for s, k in _session["controllers"].items() if k == "manual"
+    }
+    if not manual_sides:
+        return out
+    sources: list[tuple[int, int, int]] = []
+    for u in state.units:
+        if u.side in manual_sides and u.sensor > 0:
+            sources.append((u.col, u.row, u.sensor))
+    for b in (state.bases or []):
+        if b.side in manual_sides:
+            sources.append((b.col, b.row, max(b.sensor, 1)))
+    for col, row, rng in sources:
+        for h in hex_range(Hex(col, row), rng, cols, rows):
+            out.add((h.col, h.row))
+    return out
+
+
+def _auto_deploy_side(side: str) -> None:
+    """Re-place every unit on `side` (whether already on the board or
+    in the stash) onto a random valid hex on its own half that isn't
+    already exposed by a manual side's sensors. Used for AI/random
+    sides at game start, and when a controller flips manual→AI mid
+    placement."""
+    import random
+    from engine.state import UnitInstance
+
+    state = _ensure_state()
+
+    pool: list[dict] = []
+    keep: list[UnitInstance] = []
+    for u in state.units:
+        if u.side == side:
+            pool.append(u.model_dump(mode="json"))
+        else:
+            keep.append(u)
+    state.units = keep
+    bucket = _session.setdefault(
+        "stashed_units", {"blue": [], "red": []},
+    ).setdefault(side, [])
+    pool.extend(bucket)
+    bucket.clear()
+
+    occupied: set = set()
+    for u in state.units:
+        occupied.add((u.col, u.row))
+    for b in (state.bases or []):
+        occupied.add((b.col, b.row))
+    cells_by_pos = {(c.col, c.row): c for c in state.map.cells}
+    exposed = _exposed_hexes(state)
+
+    def candidates_for(d: dict, allow_exposed: bool) -> list[tuple[int, int]]:
+        out: list[tuple[int, int]] = []
+        for (col, row), cell in cells_by_pos.items():
+            if (col, row) in occupied:
+                continue
+            if not _in_own_half(side, state, col, row):
+                continue
+            terrain = getattr(cell.terrain, "value", str(cell.terrain))
+            if d["domain"] == "land" and terrain == "water":
+                continue
+            if d["domain"] == "sea" and terrain != "water":
+                continue
+            if not allow_exposed and (col, row) in exposed:
+                continue
+            out.append((col, row))
+        return out
+
+    for d in pool:
+        cands = candidates_for(d, allow_exposed=False)
+        if not cands:
+            cands = candidates_for(d, allow_exposed=True)
+        if not cands:
+            # Last resort: keep at the scenario default position even
+            # if it conflicts with the half rule. Better than nothing.
+            defaults = _session.get("default_unit_hex", {})
+            cands = [defaults.get(d["id"], (d["col"], d["row"]))]
+        col, row = random.choice(cands)
+        d["col"], d["row"] = col, row
+        state.units.append(UnitInstance(**d))
+        occupied.add((col, row))
+
+
+def _take_from_stash(side: str, unit_id: str) -> Optional[dict]:
+    """Pop one unit from the side's stash by id (or None if not there)."""
+    bucket = _session.setdefault(
+        "stashed_units", {"blue": [], "red": []},
+    ).get(side, [])
+    for i, d in enumerate(bucket):
+        if d["id"] == unit_id:
+            return bucket.pop(i)
+    return None
+
+
+def _begin_placement_phase() -> None:
+    """Snapshot defaults, decide whether placement is on, stash every
+    manual-side roster, and auto-deploy every AI/random side onto
+    private (non-revealed) hexes on its own half. Call this right
+    after a fresh scenario has been loaded into _session['state']."""
+    _snapshot_default_hexes()
+    _session["stashed_units"] = {"blue": [], "red": []}
+    anyone_manual = any(v == "manual" for v in _session["controllers"].values())
+    _session["placement_phase"] = anyone_manual
+    if anyone_manual:
+        for side, kind in _session["controllers"].items():
+            if kind == "manual":
+                _stash_side(side)
+        # After stashing manual sides, the AI sides are re-deployed
+        # so they (a) sit on their own half and (b) aren't already
+        # in any manual base's sensor cone.
+        for side, kind in _session["controllers"].items():
+            if kind != "manual":
+                _auto_deploy_side(side)
+
+
 def _ensure_state() -> GameState:
+    fresh = False
     if _session["state"] is None:
         _session["state"] = load_scenario(SCENARIO_PATH)
+        fresh = True
+    # Cold-start path: first time we materialize state in this process
+    # AND nothing has stashed/snapshotted yet → run the standard
+    # placement-phase setup so a manual-side reload sees an empty board
+    # and a populated drawer instead of every unit pre-placed.
+    if fresh and not _session.get("default_unit_hex"):
+        _begin_placement_phase()
     return _session["state"]
 
 
@@ -380,6 +586,9 @@ async def swap_region(key: str) -> SwapResult:
             _session["last_reasoning"] = {"blue": None, "red": None}
             import uuid
             _session["current_game_id"] = "game_" + uuid.uuid4().hex[:6]
+            # Fresh game: snapshot default hexes, stash manual sides.
+            _begin_placement_phase()
+            _persist_state()
         return SwapResult(
             ok=True,
             name=cfg["name"],
@@ -414,6 +623,9 @@ async def reroll() -> RerollResult:
             _session["last_reasoning"] = {"blue": None, "red": None}
             import uuid
             _session["current_game_id"] = "game_" + uuid.uuid4().hex[:6]
+            # Fresh game: snapshot default hexes, stash manual sides.
+            _begin_placement_phase()
+            _persist_state()
         return RerollResult(
             ok=True, name=name, seed=seed,
             duration_ms=int((time.monotonic() - t0) * 1000),
@@ -495,6 +707,10 @@ async def submit_orders(body: OrdersBody) -> OrdersResult:
 @app.post("/api/resolve", response_model=ResolveResult)
 async def resolve_endpoint() -> ResolveResult:
     async with _session_lock:
+        if _session.get("placement_phase"):
+            raise HTTPException(
+                409, "still in placement phase — POST /api/placement/end first",
+            )
         if not (_session["blue_locked"] and _session["red_locked"]):
             raise HTTPException(
                 409,
@@ -663,7 +879,34 @@ async def set_controller(req: ControllerSetReq) -> ControllerSetResp:
                  f"Known: {known_kinds()}",
         )
     async with _session_lock:
+        prev = _session["controllers"].get(req.side)
         _session["controllers"][req.side] = req.kind
+        state = _ensure_state()
+        pre_game = state.turn == 0
+        if pre_game:
+            if prev != "manual" and req.kind == "manual":
+                # AI → manual at any pre-game point: re-open placement
+                # for that side and pull its roster into the drawer.
+                # If we'd auto-ended placement when both went AI, this
+                # is what brings the drawer back.
+                _session["placement_phase"] = True
+                _stash_side(req.side)
+                _persist_state()
+            elif prev == "manual" and req.kind != "manual":
+                # Manual → AI: drop the stashed roster onto fresh
+                # private hexes on the side's own half. Only meaningful
+                # while we're still placing — once the user has hit
+                # READY (placement_phase=False) we leave their placed
+                # units in place.
+                if _session.get("placement_phase"):
+                    _auto_deploy_side(req.side)
+                    _persist_state()
+            # If neither side is manual, there's nobody to drag units —
+            # auto-end placement so AI vs AI just rolls into turn 1.
+            if not any(v == "manual" for v in _session["controllers"].values()):
+                _session["placement_phase"] = False
+        # Mid-game (turn>=1): toggling controllers only changes who
+        # plans the next move; the board is left untouched.
     return ControllerSetResp(ok=True, controllers=dict(_session["controllers"]))
 
 
@@ -821,6 +1064,148 @@ async def end_game(req: EndGameReq) -> EndGameResp:
         lessons=_session["last_lessons"],
         game_id=gid,
     )
+
+
+# ============= Placement phase =========================================
+
+class PlacementMoveReq(BaseModel):
+    unit_id: str
+    target_hex: list[int]   # [col, row]
+
+
+class PlacementMoveResp(BaseModel):
+    ok: bool
+    unit_id: str
+    target_hex: list[int]
+
+
+@app.get("/api/placement/state")
+async def placement_state() -> dict:
+    """Whether the game is currently in placement phase + which sides
+    are 'manual' + the un-placed (stashed) roster per side that the
+    drawer should render."""
+    stashed = _session.get("stashed_units") or {"blue": [], "red": []}
+    return {
+        "active": bool(_session.get("placement_phase", False)),
+        "controllers": dict(_session["controllers"]),
+        "stashed": {
+            "blue": list(stashed.get("blue", [])),
+            "red": list(stashed.get("red", [])),
+        },
+    }
+
+
+@app.post("/api/placement/move", response_model=PlacementMoveResp)
+async def placement_move(req: PlacementMoveReq) -> PlacementMoveResp:
+    """Drop a unit onto a target hex. Two paths:
+       (1) unit is in the side's stash → pop it, set col/row, push
+           it onto the board (first placement from drawer).
+       (2) unit is already on the board → relocate it (re-drag on map).
+    Validates: placement phase active; unit belongs to a manual side;
+    target in bounds; terrain matches unit domain; hex not occupied.
+    """
+    async with _session_lock:
+        if not _session.get("placement_phase"):
+            raise HTTPException(409, "placement phase has ended")
+        state = _ensure_state()
+        if len(req.target_hex) != 2:
+            raise HTTPException(400, "target_hex must be [col, row]")
+        tc, tr = int(req.target_hex[0]), int(req.target_hex[1])
+        cols, rows = state.map.cols, state.map.rows
+        if not (0 <= tc < cols and 0 <= tr < rows):
+            raise HTTPException(400, "target_hex out of bounds")
+
+        # Find the unit on the board OR in the stash and figure out the
+        # unit metadata we need for terrain / domain checks.
+        unit = state.unit_by_id(req.unit_id)
+        if unit is not None:
+            side = unit.side
+            domain = unit.domain
+            from_stash = False
+        else:
+            # Look in both side stashes (we don't yet know which side).
+            stashed_dict: Optional[dict] = None
+            side: Optional[str] = None
+            for s in ("blue", "red"):
+                bucket = _session.get("stashed_units", {}).get(s, [])
+                for d in bucket:
+                    if d["id"] == req.unit_id:
+                        stashed_dict = d
+                        side = s
+                        break
+                if stashed_dict is not None:
+                    break
+            if stashed_dict is None or side is None:
+                raise HTTPException(404, f"unknown unit {req.unit_id!r}")
+            domain = stashed_dict["domain"]
+            from_stash = True
+
+        if _session["controllers"].get(side) != "manual":
+            raise HTTPException(
+                403, f"side {side!r} is not manual — only humans can place",
+            )
+
+        # Own-half constraint, derived from base centroids so it works for
+        # any map orientation.
+        if not _in_own_half(side, state, tc, tr):
+            raise HTTPException(
+                400, f"side {side} can only place on its own half of the map",
+            )
+
+        # Terrain compatibility
+        cell = next(
+            (c for c in state.map.cells if c.col == tc and c.row == tr), None,
+        )
+        if cell is None:
+            raise HTTPException(400, "target hex not on map")
+        terrain = getattr(cell.terrain, "value", str(cell.terrain))
+        if domain == "land" and terrain == "water":
+            raise HTTPException(400, "ground unit can't start on water")
+        if domain == "sea" and terrain != "water":
+            raise HTTPException(400, "ship can only start on water")
+
+        # Occupancy (skip the unit-being-moved, only relevant for case 2).
+        for u in state.units:
+            if not from_stash and u.id == req.unit_id:
+                continue
+            if u.col == tc and u.row == tr:
+                raise HTTPException(409, f"hex occupied by {u.id}")
+        for b in (state.bases or []):
+            if b.col == tc and b.row == tr:
+                raise HTTPException(409, f"hex occupied by base {b.id}")
+
+        if from_stash:
+            from engine.state import UnitInstance
+            d = _take_from_stash(side, req.unit_id)
+            assert d is not None, "stash row vanished mid-request"
+            d["col"], d["row"] = tc, tr
+            state.units.append(UnitInstance(**d))
+        else:
+            unit.col, unit.row = tc, tr  # type: ignore[union-attr]
+        _persist_state()
+        return PlacementMoveResp(ok=True, unit_id=req.unit_id, target_hex=[tc, tr])
+
+
+@app.post("/api/placement/end")
+async def placement_end() -> dict:
+    """Lock in current positions and start turn 1. Errors out if any
+    manual side still has unplaced units in the stash."""
+    async with _session_lock:
+        if not _session.get("placement_phase"):
+            return {"ok": True}
+        stashed = _session.get("stashed_units") or {}
+        unplaced = []
+        for side, kind in _session["controllers"].items():
+            if kind == "manual" and stashed.get(side):
+                unplaced.append(f"{side}({len(stashed[side])})")
+        if unplaced:
+            raise HTTPException(
+                409,
+                f"unplaced units remain: {', '.join(unplaced)}",
+            )
+        _session["placement_phase"] = False
+        _persist_state()
+    return {"ok": True}
 
 
 @app.get("/api/memory/lessons")
