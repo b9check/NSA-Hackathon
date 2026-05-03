@@ -109,6 +109,13 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return (await r.json()) as T
 }
 
+// Persist a single bit (real-game mode) across reloads. Stored as
+// 'wargame.realGame' = '1' | '0'. Anything else = false.
+const REAL_GAME_KEY = 'wargame.realGame'
+const initialRealGame = (() => {
+  try { return localStorage.getItem(REAL_GAME_KEY) === '1' } catch { return false }
+})()
+
 export const useStore = create<AppState>((set, get) => ({
   game: null,
   selectedUnitId: null,
@@ -117,8 +124,10 @@ export const useStore = create<AppState>((set, get) => ({
   assetVersion: 1,
   swapping: false,
   swapError: null,
-  viewMode: 'omniscient',
-  realGame: false,
+  // If real-game was on last session, default the camera to BLUE rather
+  // than OMNI (which is hidden in real-game).
+  viewMode: initialRealGame ? 'blue' : 'omniscient',
+  realGame: initialRealGame,
   turnInfo: null,
   pendingOrders: {},
   targeting: null,
@@ -136,9 +145,14 @@ export const useStore = create<AppState>((set, get) => ({
     if (!game || !selectedUnitId) return null
     return game.units.find((u) => u.id === selectedUnitId) ?? null
   },
-  setViewMode: (m) => set({ viewMode: m, selectedUnitId: null }),
+  setViewMode: (m) => set((s) => {
+    // While real-game is on, OMNI is forbidden — coerce to 'blue'.
+    const safe = s.realGame && m === 'omniscient' ? 'blue' : m
+    return { viewMode: safe, selectedUnitId: null }
+  }),
   toggleRealGame: () => set((s) => {
     const realGame = !s.realGame
+    try { localStorage.setItem(REAL_GAME_KEY, realGame ? '1' : '0') } catch {}
     // When switching INTO real-game, kick the player off OMNI.
     const viewMode = realGame && s.viewMode === 'omniscient' ? 'blue' : s.viewMode
     return { realGame, viewMode, selectedUnitId: null }
