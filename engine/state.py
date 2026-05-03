@@ -43,6 +43,7 @@ class WeaponRef(BaseModel):
     range: int
     damage: int = 1                # deterministic HP removed per hit
     self_destruct: bool = False    # attacker dies after firing (one-shot)
+    target_domains: list[str] = Field(default_factory=lambda: ["land", "air", "sea"])
     ammo: int = -1
     notes: str = ""
 

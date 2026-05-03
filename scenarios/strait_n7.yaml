@@ -1,5 +1,5 @@
 name: "Galician Approach"
-seed: 76193
+seed: 431328
 turn_limit: 30
 
 # 20 cols x 15 rows. Pointy-top, odd-r offset.
@@ -31,26 +31,26 @@ victory:
 
 # Mobile units (auto-placed by scripts/sample_terrain.py per seed).
 units:
-  - { id: blue-destroyer-1        , side: blue , type: destroyer         , pos: [ 2, 13] }
-  - { id: blue-fighter-1          , side: blue , type: fighter           , pos: [ 8, 14] }
-  - { id: blue-bomber-1           , side: blue , type: bomber            , pos: [11, 12] }
-  - { id: blue-scout_drone-1      , side: blue , type: scout_drone       , pos: [13,  8] }
-  - { id: blue-missile_launcher-1 , side: blue , type: missile_launcher  , pos: [11,  9] }
-  - { id: blue-armor-1            , side: blue , type: armor             , pos: [18, 11] }
-  - { id: blue-infantry-1         , side: blue , type: infantry          , pos: [11, 11] }
-  - { id: blue-infantry-2         , side: blue , type: infantry          , pos: [11, 10] }
-  - { id: red-destroyer-1         , side: red  , type: destroyer         , pos: [ 0,  6] }
-  - { id: red-fighter-1           , side: red  , type: fighter           , pos: [16,  2] }
-  - { id: red-bomber-1            , side: red  , type: bomber            , pos: [ 9,  1] }
-  - { id: red-scout_drone-1       , side: red  , type: scout_drone       , pos: [11,  7] }
+  - { id: blue-destroyer-1        , side: blue , type: destroyer         , pos: [ 8,  8] }
+  - { id: blue-fighter-1          , side: blue , type: fighter           , pos: [ 6, 14] }
+  - { id: blue-bomber-1           , side: blue , type: bomber            , pos: [ 1, 12] }
+  - { id: blue-scout_drone-1      , side: blue , type: scout_drone       , pos: [ 9,  9] }
+  - { id: blue-missile_launcher-1 , side: blue , type: missile_launcher  , pos: [11, 12] }
+  - { id: blue-armor-1            , side: blue , type: armor             , pos: [16,  9] }
+  - { id: blue-infantry-1         , side: blue , type: infantry          , pos: [10, 11] }
+  - { id: blue-infantry-2         , side: blue , type: infantry          , pos: [ 9, 11] }
+  - { id: blue-strike_drone-1     , side: blue , type: strike_drone      , pos: [14, 13] }
+  - { id: red-destroyer-1         , side: red  , type: destroyer         , pos: [ 1,  1] }
+  - { id: red-fighter-1           , side: red  , type: fighter           , pos: [11,  2] }
+  - { id: red-bomber-1            , side: red  , type: bomber            , pos: [16,  0] }
+  - { id: red-scout_drone-1       , side: red  , type: scout_drone       , pos: [ 6,  3] }
   - { id: red-missile_launcher-1  , side: red  , type: missile_launcher  , pos: [ 8,  4] }
-  - { id: red-armor-1             , side: red  , type: armor             , pos: [ 9,  4] }
-  - { id: red-infantry-1          , side: red  , type: infantry          , pos: [ 6,  2] }
-  - { id: red-infantry-2          , side: red  , type: infantry          , pos: [ 7,  2] }
-  - { id: red-strike_drone-1      , side: red  , type: strike_drone      , pos: [18,  1] }
-  - { id: red-strike_drone-2      , side: red  , type: strike_drone      , pos: [16,  1] }
+  - { id: red-armor-1             , side: red  , type: armor             , pos: [ 7,  0] }
+  - { id: red-infantry-1          , side: red  , type: infantry          , pos: [10,  5] }
+  - { id: red-infantry-2          , side: red  , type: infantry          , pos: [10,  4] }
+  - { id: red-strike_drone-1      , side: red  , type: strike_drone      , pos: [18,  0] }
 
 # One base per side.
 bases:
-  - { id: blue-base-1             , side: blue , type: base              , pos: [18, 12] }
-  - { id: red-base-1              , side: red  , type: base              , pos: [19,  1] }
+  - { id: blue-base-1             , side: blue , type: base              , pos: [16, 13] }
+  - { id: red-base-1              , side: red  , type: base              , pos: [ 9,  0] }

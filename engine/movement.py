@@ -12,9 +12,26 @@ def _terrain_grid(state: GameState) -> dict[tuple[int, int], Terrain]:
     return {(c.col, c.row): c.terrain for c in state.map.cells}
 
 
+def _enemy_hexes(state: GameState, side: str) -> set[tuple[int, int]]:
+    """Hexes occupied by enemy units (bases counted too) — blocked for
+    pathfinding. Friendly hexes are passable (you can "stack").
+    """
+    out: set[tuple[int, int]] = set()
+    for u in state.units:
+        if u.side != side:
+            out.add((u.col, u.row))
+    for b in state.bases:
+        if b.side != side:
+            out.add((b.col, b.row))
+    return out
+
+
 def reachable(state: GameState, unit: UnitInstance) -> dict[tuple[int, int], int]:
-    """Map of (col,row) -> min move-cost spent to reach, within unit.speed."""
+    """Map of (col,row) -> min move-cost spent to reach, within unit.speed.
+    Enemy-occupied hexes are blocked (you can't walk through enemies).
+    """
     grid = _terrain_grid(state)
+    blocked = _enemy_hexes(state, unit.side)
     cols, rows = state.map.cols, state.map.rows
     start = Hex(unit.col, unit.row)
     best: dict[tuple[int, int], int] = {(start.col, start.row): 0}
@@ -25,6 +42,8 @@ def reachable(state: GameState, unit: UnitInstance) -> dict[tuple[int, int], int
             continue
         for nb in neighbors(Hex(c, r)):
             if not in_bounds(nb, cols, rows):
+                continue
+            if (nb.col, nb.row) in blocked:
                 continue
             terr = grid[(nb.col, nb.row)]
             if not can_traverse(unit.domain, terr):
@@ -54,9 +73,13 @@ def path_to(
     if (unit.col, unit.row) == (dest_col, dest_row):
         return [(unit.col, unit.row)]
     grid = _terrain_grid(state)
+    blocked = _enemy_hexes(state, unit.side)
     cols, rows = state.map.cols, state.map.rows
     start = (unit.col, unit.row)
     target = (dest_col, dest_row)
+    # Refuse to path INTO an enemy-occupied hex.
+    if target in blocked:
+        return None
     best: dict[tuple[int, int], int] = {start: 0}
     came_from: dict[tuple[int, int], tuple[int, int]] = {}
     pq: list[tuple[int, int, int]] = [(0, start[0], start[1])]
@@ -68,6 +91,8 @@ def path_to(
             continue
         for nb in neighbors(Hex(c, r)):
             if not in_bounds(nb, cols, rows):
+                continue
+            if (nb.col, nb.row) in blocked:
                 continue
             terr = grid[(nb.col, nb.row)]
             if not can_traverse(unit.domain, terr):

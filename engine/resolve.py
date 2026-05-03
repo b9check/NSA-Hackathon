@@ -70,15 +70,29 @@ def _entity_at(state: GameState, hex_: Tuple[int, int]):
     return None
 
 
-def _enemies_at(state: GameState, side: str, hex_: Tuple[int, int]):
-    """Every enemy unit/base on the given hex."""
+def _enemies_at(
+    state: GameState, side: str, hex_: Tuple[int, int],
+    domain_filter: Optional[set] = None,
+):
+    """Every enemy unit/base on the given hex. Optionally filtered to
+    targets whose domain is in `domain_filter` (e.g. a bomb only hits
+    {"land","sea"}). Bases count as a "land" target."""
+    def domain_of(ent) -> str:
+        # Treat bases as land for weapon-domain filtering.
+        return "land" if isinstance(ent, BaseInstance) else getattr(ent, "domain", "land")
     out = []
     for u in state.units:
-        if u.side != side and (u.col, u.row) == hex_:
-            out.append(u)
+        if u.side == side or (u.col, u.row) != hex_:
+            continue
+        if domain_filter is not None and domain_of(u) not in domain_filter:
+            continue
+        out.append(u)
     for b in state.bases:
-        if b.side != side and (b.col, b.row) == hex_:
-            out.append(b)
+        if b.side == side or (b.col, b.row) != hex_:
+            continue
+        if domain_filter is not None and domain_of(b) not in domain_filter:
+            continue
+        out.append(b)
     return out
 
 
@@ -242,6 +256,10 @@ def _phase_move(
             if picked is None:
                 continue
             w, _idx = picked
+            # Respect weapon's target_domains (e.g. a bomber on overwatch
+            # can't engage an air mover).
+            if w.target_domains and mover.domain not in w.target_domains:
+                continue
             if w.ammo > 0:
                 w.ammo -= 1
             dmg = w.damage
@@ -290,7 +308,10 @@ def _phase_strike(
         # Burn the ammo on attempt.
         if w.ammo > 0:
             w.ammo -= 1
-        targets = _enemies_at(state, atk.side, tuple(o.target_hex))
+        domain_filter = set(w.target_domains) if w.target_domains else None
+        targets = _enemies_at(
+            state, atk.side, tuple(o.target_hex), domain_filter=domain_filter,
+        )
         whiffed = len(targets) == 0
         targets_hit = [t.id for t in targets]
         damage_applied = 0 if whiffed else w.damage

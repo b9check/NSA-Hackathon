@@ -797,6 +797,24 @@ function commitTargetingClick(
       if (hex.col === unit.col && hex.row === unit.row) return false
       if (hexDistance(unit.col, unit.row, hex.col, hex.row) > unit.speed)
         return rejectClick('out of move range', hex, game)
+      // Terrain check: ground can't enter water; sea can't enter land.
+      const cell = game.map.cells.find((c) => c.col === hex.col && c.row === hex.row)
+      if (cell) {
+        if (unit.domain === 'land' && cell.terrain === 'water')
+          return rejectClick('ground unit can\'t enter water', hex, game)
+        if (unit.domain === 'sea' && cell.terrain !== 'water')
+          return rejectClick('ship can only travel on water', hex, game)
+        if (unit.domain === 'land' && cell.terrain === 'mountain')
+          return rejectClick('mountain blocks ground unit', hex, game)
+      }
+      // Refuse to step ONTO an enemy hex.
+      const enemyOnHex = game.units.some(
+        (u) => u.side !== unit.side && u.col === hex.col && u.row === hex.row,
+      ) || (game.bases ?? []).some(
+        (b) => b.side !== unit.side && b.col === hex.col && b.row === hex.row,
+      )
+      if (enemyOnHex)
+        return rejectClick('enemy occupies that hex', hex, game)
       setOrder({
         kind: 'MOVE', unit_id: unit.id,
         target_hex: [hex.col, hex.row],

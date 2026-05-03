@@ -181,97 +181,56 @@ def place_units(grid, cols: int, rows: int, seed: int) -> list[dict]:
             return
         units.append({"id": uid, "side": side, "type": utype, "pos": pos})
 
-    # ============== Blue (south) ==============
-    add("blue-destroyer-1", "blue", "destroyer", pick(
-        AND(south_half, is_deep),
-        AND(south_half, is_water),
-        is_water,
-    ))
-    add("blue-fighter-1", "blue", "fighter", pick(
-        south_band,
-        south_half,
-    ))
-    add("blue-bomber-1", "blue", "bomber", pick(
-        south_band,
-        south_half,
-    ))
-    add("blue-scout_drone-1", "blue", "scout_drone", pick(
-        south_push,
-        south_half,
-    ))
-    add("blue-missile_launcher-1", "blue", "missile_launcher", pick(
-        AND(south_half, is_coast, is_settled),
-        AND(south_half, is_coast, is_land),
-        AND(south_half, is_settled),
-        AND(south_half, is_land),
-    ))
-    add("blue-armor-1", "blue", "armor", pick(
-        AND(south_half, is_settled, not_coastal),
-        AND(south_half, is_settled),
-        AND(south_half, is_land),
-    ))
-    blue_inf_anchor = pick(
-        AND(south_half, is_coast, is_land),
-        AND(south_half, is_land),
-    )
-    add("blue-infantry-1", "blue", "infantry", blue_inf_anchor)
-    add("blue-infantry-2", "blue", "infantry", pick(
-        AND(south_half, near(blue_inf_anchor, 2), is_land),
-        AND(south_half, near(blue_inf_anchor, 4), is_land),
-        AND(south_half, is_land),
-    ))
+    # Both sides get the SAME 9-unit roster, just placed in mirrored
+    # halves. Numbers are symmetric so neither side starts ahead.
+    def half_filter(side: str):
+        if side == "blue":
+            return south_half, south_band, south_push
+        return north_half, north_band, north_push
 
-    # ============== Red (north) ==============
-    add("red-destroyer-1", "red", "destroyer", pick(
-        AND(north_half, is_deep),
-        AND(north_half, is_water),
-        is_water,
-    ))
-    add("red-fighter-1", "red", "fighter", pick(
-        north_band,
-        north_half,
-    ))
-    add("red-bomber-1", "red", "bomber", pick(
-        north_band,
-        north_half,
-    ))
-    add("red-scout_drone-1", "red", "scout_drone", pick(
-        north_push,
-        north_half,
-    ))
-    add("red-missile_launcher-1", "red", "missile_launcher", pick(
-        AND(north_half, is_coast, is_settled),
-        AND(north_half, is_coast, is_land),
-        AND(north_half, is_settled),
-        AND(north_half, is_land),
-    ))
-    add("red-armor-1", "red", "armor", pick(
-        AND(north_half, is_settled, not_coastal),
-        AND(north_half, is_settled),
-        AND(north_half, is_land),
-    ))
-    red_inf_anchor = pick(
-        AND(north_half, is_coast, is_land),
-        AND(north_half, is_land),
-    )
-    add("red-infantry-1", "red", "infantry", red_inf_anchor)
-    add("red-infantry-2", "red", "infantry", pick(
-        AND(north_half, near(red_inf_anchor, 2), is_land),
-        AND(north_half, near(red_inf_anchor, 4), is_land),
-        AND(north_half, is_land),
-    ))
-    # Strike-drone pair: kamikaze, clustered in red rear.
-    sd_anchor = pick(
-        AND(north_band, is_land),
-        north_band,
-        north_half,
-    )
-    add("red-strike_drone-1", "red", "strike_drone", sd_anchor)
-    add("red-strike_drone-2", "red", "strike_drone", pick(
-        near(sd_anchor, 2),
-        near(sd_anchor, 4),
-        north_half,
-    ))
+    for side in ("blue", "red"):
+        own_half, own_band, own_push = half_filter(side)
+        add(f"{side}-destroyer-1", side, "destroyer", pick(
+            AND(own_half, is_deep),
+            AND(own_half, is_water),
+            is_water,
+        ))
+        add(f"{side}-fighter-1", side, "fighter", pick(
+            own_band, own_half,
+        ))
+        add(f"{side}-bomber-1", side, "bomber", pick(
+            own_band, own_half,
+        ))
+        add(f"{side}-scout_drone-1", side, "scout_drone", pick(
+            own_push, own_half,
+        ))
+        add(f"{side}-missile_launcher-1", side, "missile_launcher", pick(
+            AND(own_half, is_coast, is_settled),
+            AND(own_half, is_coast, is_land),
+            AND(own_half, is_settled),
+            AND(own_half, is_land),
+        ))
+        add(f"{side}-armor-1", side, "armor", pick(
+            AND(own_half, is_settled, not_coastal),
+            AND(own_half, is_settled),
+            AND(own_half, is_land),
+        ))
+        inf_anchor = pick(
+            AND(own_half, is_coast, is_land),
+            AND(own_half, is_land),
+        )
+        add(f"{side}-infantry-1", side, "infantry", inf_anchor)
+        add(f"{side}-infantry-2", side, "infantry", pick(
+            AND(own_half, near(inf_anchor, 2), is_land),
+            AND(own_half, near(inf_anchor, 4), is_land),
+            AND(own_half, is_land),
+        ))
+        # Single strike-drone in the rear — a kamikaze threat each side
+        # has to scout for.
+        add(f"{side}-strike_drone-1", side, "strike_drone", pick(
+            AND(own_band, is_land),
+            own_band, own_half,
+        ))
 
     return [u for u in units if u["pos"] is not None]
 

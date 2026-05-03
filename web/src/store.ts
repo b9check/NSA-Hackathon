@@ -35,6 +35,10 @@ interface AppState {
   swapping: boolean
   swapError: string | null
   viewMode: ViewMode
+  /** When true, OMNI view is disabled and the game auto-snaps the
+   *  camera back to the *queueing* side after RESOLVE TURN, so two
+   *  humans can hot-seat without seeing each other's intel. */
+  realGame: boolean
   // Turn flow
   turnInfo: TurnInfo | null
   pendingOrders: Record<string, Order> // keyed by unit_id
@@ -58,6 +62,7 @@ interface AppState {
   setHover: (h: { col: number; row: number } | null) => void
   selectedUnit: () => UnitInstance | null
   setViewMode: (m: ViewMode) => void
+  toggleRealGame: () => void
 
   loadRegions: () => Promise<void>
   swapRegion: (key: string) => Promise<void>
@@ -113,6 +118,7 @@ export const useStore = create<AppState>((set, get) => ({
   swapping: false,
   swapError: null,
   viewMode: 'omniscient',
+  realGame: false,
   turnInfo: null,
   pendingOrders: {},
   targeting: null,
@@ -131,6 +137,12 @@ export const useStore = create<AppState>((set, get) => ({
     return game.units.find((u) => u.id === selectedUnitId) ?? null
   },
   setViewMode: (m) => set({ viewMode: m, selectedUnitId: null }),
+  toggleRealGame: () => set((s) => {
+    const realGame = !s.realGame
+    // When switching INTO real-game, kick the player off OMNI.
+    const viewMode = realGame && s.viewMode === 'omniscient' ? 'blue' : s.viewMode
+    return { realGame, viewMode, selectedUnitId: null }
+  }),
 
   loadRegions: async () => {
     try {
@@ -247,16 +259,20 @@ export const useStore = create<AppState>((set, get) => ({
       )
       // Stage events for the MapStage replay. It clears them when done
       // and triggers a refetchState() to snap to the resolver's truth.
-      // Also flip the view back to omniscient so the player watches the
-      // resolution from above instead of staying locked into red's POV.
-      set({
+      // In normal (omni-allowed) mode, flip back to OMNI so the player
+      // watches the resolution from above. In real-game mode, leave the
+      // viewMode alone — the next-side hand-off is the player's choice.
+      const next: Partial<AppState> = {
         pendingOrders: {},
         targeting: null,
         pendingEvents: events,
         eventLog: [...get().eventLog, ...annotated].slice(-200),
-        viewMode: 'omniscient',
         selectedUnitId: null,
-      })
+      }
+      if (!get().realGame) {
+        next.viewMode = 'omniscient'
+      }
+      set(next as any)
     } catch (e) {
       console.error('resolveTurn failed', e)
     } finally {

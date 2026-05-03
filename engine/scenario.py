@@ -40,6 +40,7 @@ def _weapon_refs(keys: tuple[str, ...]) -> list[WeaponRef]:
         out.append(WeaponRef(
             key=w.key, display=w.display, kind=w.kind, range=w.range,
             damage=w.damage, self_destruct=w.self_destruct,
+            target_domains=list(w.target_domains),
             ammo=w.ammo, notes=w.notes,
         ))
     return out

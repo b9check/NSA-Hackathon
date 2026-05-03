@@ -2,7 +2,7 @@ import { useStore } from '../store'
 import type { BaseInstance, SensorRef, UnitInstance, WeaponRef } from '../types'
 import { ActionMenu } from './ActionMenu'
 import { RegionPicker } from './RegionPicker'
-import { ViewModeToggle } from './ViewModeToggle'
+import { ViewModeToggle, RealGameToggle } from './ViewModeToggle'
 
 const DOMAIN_LABEL: Record<string, string> = {
   air: 'AIR',
@@ -29,6 +29,7 @@ export function TopBar() {
         <FactionPill side="blue" />
         <FactionPill side="red" />
         <div className="w-px h-5 bg-line" />
+        <RealGameToggle />
         <ViewModeToggle />
         <RegionPicker />
       </div>

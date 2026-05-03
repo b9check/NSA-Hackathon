@@ -57,10 +57,10 @@ PLATFORMS: dict[str, Platform] = {
     "armor": Platform(
         key="armor", display="Armor",
         domain="land", glyph="T",
-        speed=2, hp=6, cost=50,
+        speed=3, hp=6, cost=50,
         sensors=("passive_1",),
         weapons=("armor_gun",),
-        role="Heavy ground striker; needs spotting help",
+        role="Heavy ground striker; mobile but blind",
     ),
     "missile_launcher": Platform(
         key="missile_launcher", display="Missile Launcher",
