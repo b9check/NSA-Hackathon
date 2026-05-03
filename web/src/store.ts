@@ -97,6 +97,15 @@ interface AppState {
   setController: (side: 'blue' | 'red', kind: ControllerKind) => Promise<void>
   /** Trigger the server to run the AI for the given side, lock its orders. */
   playSideWithAI: (side: 'blue' | 'red') => Promise<void>
+  /** End the current game (force-forfeit if no winner yet) + run the
+   *  reflect pass to extract lessons into the memory store. */
+  endGameAndReflect: (opts?: { force?: boolean }) => Promise<void>
+  /** Lessons popped after the most recent endGame call. UI renders these
+   *  in a one-time drawer. */
+  lastLessons: Array<{ id: string; claim: string; tags?: any; side?: string; outcome?: string }>
+  reflecting: boolean
+  showLessonsDrawer: boolean
+  dismissLessonsDrawer: () => void
 
   // ---- Turn flow -------------------------------------------------
   /** Pull the latest turn meta (scores, locks, counts) from /api/turn. */
@@ -218,6 +227,9 @@ export const useStore = create<AppState>((set, get) => ({
   controllers: { blue: 'manual', red: 'manual' },
   aiReasoning: { blue: null, red: null },
   aiThinking: { blue: false, red: false },
+  lastLessons: [],
+  reflecting: false,
+  showLessonsDrawer: false,
   eventLog: [],
 
   setGame: (g) => set({ game: g }),
@@ -329,6 +341,36 @@ export const useStore = create<AppState>((set, get) => ({
       console.error('setController failed', e)
     }
   },
+
+  endGameAndReflect: async (opts) => {
+    set({ reflecting: true })
+    try {
+      const r = await fetchJson<{
+        ok: boolean
+        winner: string | null
+        win_reason: string | null
+        lessons: Array<{ id: string; claim: string; tags?: any; side?: string; outcome?: string }>
+        game_id: string
+      }>('/api/game/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: !!(opts?.force) }),
+      })
+      set({
+        lastLessons: r.lessons || [],
+        showLessonsDrawer: true,
+      })
+      // Sync the in-memory state.json so the EndGameOverlay reflects the
+      // forced winner immediately.
+      await get().refetchState()
+    } catch (e) {
+      console.error('endGameAndReflect failed', e)
+    } finally {
+      set({ reflecting: false })
+    }
+  },
+
+  dismissLessonsDrawer: () => set({ showLessonsDrawer: false }),
 
   playSideWithAI: async (side) => {
     set((s) => ({ aiThinking: { ...s.aiThinking, [side]: true } }))

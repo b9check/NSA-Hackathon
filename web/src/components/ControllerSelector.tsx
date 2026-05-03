@@ -23,21 +23,24 @@ export function ControllerSelector({ side }: { side: 'blue' | 'red' }) {
     setController(side, KINDS[(i + 1) % KINDS.length])
   }
 
+  // Single-letter prefix keeps the pill narrow (~78px) — important since
+  // it lives next to the faction pills, RealGameToggle, view-mode toggle,
+  // and region picker in a dense top bar.
+  const label = thinking ? '…' : kind === 'manual' ? 'man' : kind
   return (
     <button
       onClick={next}
       disabled={thinking}
-      title={`${side.toUpperCase()} controller — click to cycle (manual → random → llm)`}
+      title={`${side.toUpperCase()} controller: ${kind} — click to cycle (manual → random → llm)`}
       className={[
-        'h-8 px-2.5 inline-flex items-center gap-2 rounded-sm border bg-panel2/40',
-        'font-mono text-[11px] tracking-widest transition-colors whitespace-nowrap',
+        'h-8 px-2 inline-flex items-center gap-1.5 rounded-sm border bg-panel2/40',
+        'font-mono text-[10px] tracking-widest transition-colors whitespace-nowrap',
         c.border,
       ].join(' ')}
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
-      <span className={`${c.text} font-semibold`}>{side.toUpperCase()}</span>
+      <span className={`${c.text} font-semibold`}>{side[0].toUpperCase()}</span>
       <span className={kind === 'manual' ? 'text-mute' : 'text-amber'}>
-        {thinking ? '…' : kind.toUpperCase()}
+        {label.toUpperCase()}
       </span>
     </button>
   )

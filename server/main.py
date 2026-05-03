@@ -93,6 +93,14 @@ _session: dict = {
     # Last successful AI run per side. Cached so the ReasoningPanel can
     # GET /api/ai/last_reasoning without re-rendering everything.
     "last_reasoning": {"blue": None, "red": None},
+    # Per-game accumulated trace (one row per resolved turn). Fed to
+    # ai/reflect.py at end-of-game. Cleared on reroll / region swap.
+    "game_log": [],
+    # Lessons appended in the most recent reflect call (so the UI can pop
+    # them up immediately after the game ends).
+    "last_lessons": [],
+    # Auto-incrementing game id for traceability in the lessons store.
+    "current_game_id": "game_init",
 }
 
 
@@ -356,11 +364,16 @@ async def swap_region(key: str) -> SwapResult:
         t0 = time.monotonic()
         seed = _fresh_seed()
         await _run_pipeline(cfg["lat"], cfg["lng"], cfg["zoom"], cfg["name"], seed)
-        # New scenario -> wipe session.
+        # New scenario -> wipe per-game session, keep lessons store.
         async with _session_lock:
             _session["state"] = load_scenario(SCENARIO_PATH)
             _reset_orders()
             _session["last_events"] = []
+            _session["game_log"] = []
+            _session["last_lessons"] = []
+            _session["last_reasoning"] = {"blue": None, "red": None}
+            import uuid
+            _session["current_game_id"] = "game_" + uuid.uuid4().hex[:6]
         return SwapResult(
             ok=True,
             name=cfg["name"],
@@ -389,6 +402,12 @@ async def reroll() -> RerollResult:
             _session["state"] = load_scenario(SCENARIO_PATH)
             _reset_orders()
             _session["last_events"] = []
+            # Fresh game = fresh trace + new game id; keep the lessons store.
+            _session["game_log"] = []
+            _session["last_lessons"] = []
+            _session["last_reasoning"] = {"blue": None, "red": None}
+            import uuid
+            _session["current_game_id"] = "game_" + uuid.uuid4().hex[:6]
         return RerollResult(
             ok=True, name=name, seed=seed,
             duration_ms=int((time.monotonic() - t0) * 1000),
@@ -491,9 +510,19 @@ async def resolve_endpoint() -> ResolveResult:
         turn_started = state.turn
         events: list[Event] = resolve_turn(state, blue_orders, red_orders)
         _session["last_events"] = events
+        blue_score, red_score = compute_scores(state)
+        # Accumulate per-turn snapshot for the post-game reflect pass.
+        # Pulls in each side's last AI summary if there was one.
+        last_reasoning = _session.get("last_reasoning") or {}
+        _session["game_log"].append({
+            "turn": turn_started,
+            "blue_summary": (last_reasoning.get("blue") or {}).get("summary", ""),
+            "red_summary": (last_reasoning.get("red") or {}).get("summary", ""),
+            "scores": {"blue": blue_score, "red": red_score},
+            "events": [e.model_dump() for e in events],
+        })
         _reset_orders()
         _persist_state()
-        blue_score, red_score = compute_scores(state)
         return ResolveResult(
             ok=True,
             turn_started_at=turn_started,
@@ -662,4 +691,107 @@ async def last_reasoning(side: str) -> dict:
         "summary": "",
         "decisions": [],
         "fallback": False,
+    }
+
+
+# ============= Game-end + reflection ====================================
+
+class EndGameReq(BaseModel):
+    # If true, force-end the game even if no winner yet (compute one from
+    # current HP totals). Default: only end if engine already declared a
+    # winner.
+    force: bool = False
+
+
+class EndGameResp(BaseModel):
+    ok: bool
+    winner: Optional[str]
+    win_reason: Optional[str]
+    lessons: list[dict]
+    game_id: str
+
+
+def _hp_total(state: GameState, side: str) -> int:
+    return (
+        sum(u.hp for u in state.units if u.side == side)
+        + sum(b.hp for b in state.bases if b.side == side)
+    )
+
+
+@app.post("/api/game/end", response_model=EndGameResp)
+async def end_game(req: EndGameReq) -> EndGameResp:
+    """End the current match (manually or because the engine says so),
+    run the reflect pass, and append lessons to memory/lessons.jsonl.
+
+    Returns the freshly-extracted lessons so the UI can pop a "lessons
+    learned" drawer the moment the game ends.
+    """
+    from ai.reflect import reflect_and_persist  # lazy import (Anthropic SDK)
+
+    async with _session_lock:
+        state = _ensure_state()
+        # Determine winner
+        winner = state.winner
+        win_reason = state.win_reason
+        if winner is None:
+            if not req.force:
+                raise HTTPException(
+                    409, "game not over and force=false; pass force=true to forfeit",
+                )
+            blue_hp = _hp_total(state, "blue")
+            red_hp = _hp_total(state, "red")
+            if blue_hp > red_hp:
+                winner, win_reason = "blue", "manual_forfeit"
+            elif red_hp > blue_hp:
+                winner, win_reason = "red", "manual_forfeit"
+            else:
+                winner, win_reason = "draw", "manual_forfeit"
+            state.winner = winner
+            state.win_reason = win_reason
+            _persist_state()
+
+        gid = _session.get("current_game_id") or "game_unknown"
+        log_rows = list(_session.get("game_log") or [])
+        final_state_dict = state.model_dump(mode="json")
+
+    # Run reflection OUTSIDE the session lock — it blocks on the LLM call.
+    lessons = await reflect_and_persist(
+        log_rows, final_state_dict, game_id=gid,
+    )
+    async with _session_lock:
+        _session["last_lessons"] = [
+            {
+                "id": l.id, "claim": l.claim, "tags": l.tags,
+                "side": l.side, "outcome": l.outcome,
+            }
+            for l in lessons
+        ]
+
+    return EndGameResp(
+        ok=True,
+        winner=winner,
+        win_reason=win_reason,
+        lessons=_session["last_lessons"],
+        game_id=gid,
+    )
+
+
+@app.get("/api/memory/lessons")
+async def get_lessons() -> dict:
+    """Return all lessons currently in memory.jsonl. Used by the UI's
+    "memory inspector" panel and by the demo's same-seed A/B harness."""
+    from ai.memory import load_lessons
+    lessons = load_lessons()
+    return {
+        "count": len(lessons),
+        "lessons": [
+            {
+                "id": l.id, "claim": l.claim, "tags": l.tags,
+                "side": l.side, "outcome": l.outcome,
+                "source_game_id": l.source_game_id,
+                "source_turn": l.source_turn,
+                "created_ts": l.created_ts,
+            }
+            for l in sorted(lessons, key=lambda x: -x.created_ts)
+        ],
     }

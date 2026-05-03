@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import anthropic
 
 from ai.controller import Controller, ControllerResult, register_controller
+from ai.memory import load_lessons, top_k
 from ai.menu import build_menus
 from ai.prompt import SYSTEM_PROMPT, TOOL_SCHEMA, render_user_message
 from ai.validate import validate_plan
@@ -56,7 +57,10 @@ class LLMController(Controller):
             return [], {"summary": "no controllable units", "decisions": []}
 
         menus = build_menus(state, side)
-        user_msg = render_user_message(state, side, menus)
+        # Retrieve recent lessons from memory.jsonl. v1 retrieval =
+        # most-recent-K; smarter scoring is a Phase C+ refinement.
+        lessons = top_k(load_lessons(), k=5)
+        user_msg = render_user_message(state, side, menus, lessons=lessons)
 
         # Single tool-use call. Cache the system prompt so turn N+1 hits the
         # cache and pays only the diff (the per-turn block is ~1.5k tokens).

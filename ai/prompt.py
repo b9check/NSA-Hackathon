@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from ai.memory import Lesson, render_for_prompt
 from ai.menu import UnitMenu, _seen_by_side
 from engine.state import GameState
 
@@ -111,8 +112,22 @@ def render_menu_block(menus: Dict[str, UnitMenu]) -> str:
     return "\n".join(lines)
 
 
-def render_user_message(state: GameState, side: str, menus: Dict[str, UnitMenu]) -> str:
-    return render_state(state, side) + "\n" + render_menu_block(menus)
+def render_memory_block(lessons: List[Lesson]) -> str:
+    """Render top-K retrieved lessons for the LLM. Empty stub if none."""
+    return f"## Lessons from prior games\n\n{render_for_prompt(lessons)}"
+
+
+def render_user_message(
+    state: GameState,
+    side: str,
+    menus: Dict[str, UnitMenu],
+    lessons: List[Lesson] | None = None,
+) -> str:
+    parts = [render_state(state, side)]
+    if lessons:
+        parts.append(render_memory_block(lessons))
+    parts.append(render_menu_block(menus))
+    return "\n".join(parts)
 
 
 # --------------------------------------------------------------------

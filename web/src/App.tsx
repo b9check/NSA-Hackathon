@@ -3,6 +3,7 @@ import { useStore } from './store'
 import { MapStage } from './components/MapStage'
 import { TopBar, RightRail } from './components/HUD'
 import { ReasoningPanel } from './components/ReasoningPanel'
+import { LessonsDrawer } from './components/LessonsDrawer'
 import { TurnBar } from './components/TurnBar'
 import { EndGameOverlay } from './components/EndGameOverlay'
 import { BattleLog } from './components/BattleLog'
@@ -136,6 +137,7 @@ export default function App() {
         </div>
         {swapping && <SwapOverlay />}
         <EndGameOverlay />
+        <LessonsDrawer />
       </div>
       <BattleLog />
       <BottomBar />

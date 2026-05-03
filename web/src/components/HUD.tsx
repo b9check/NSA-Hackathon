@@ -30,17 +30,16 @@ export function TopBar() {
         <WinChipSep />
         <WinChip label={`T${turnCap} HP%`}          tip={`At turn ${turnCap}, side with higher HP%% wins (tie = draw)`} />
       </div>
-      <div className="ml-auto flex items-center gap-3 flex-shrink-0">
+      <div className="ml-auto flex items-center gap-2 flex-shrink-0">
         <FactionPill side="blue" />
         <FactionPill side="red" />
-        <div className="w-px h-5 bg-line mx-1" />
+        <div className="w-px h-5 bg-line" />
         <ControllerSelector side="blue" />
         <ControllerSelector side="red" />
-        <div className="w-px h-5 bg-line mx-1" />
+        <div className="w-px h-5 bg-line" />
         <RealGameToggle />
-        <div className="w-px h-5 bg-line mx-1" />
         <ViewModeToggle />
-        <div className="w-px h-5 bg-line mx-1" />
+        <div className="w-px h-5 bg-line" />
         <RegionPicker />
       </div>
     </div>

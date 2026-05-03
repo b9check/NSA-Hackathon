@@ -116,6 +116,8 @@ export function TurnBar() {
 
       <div className="flex-1" />
 
+      <EndGameButton />
+
       {/* Resolve */}
       <button
         onClick={() => canResolve && resolveTurn()}
@@ -131,6 +133,32 @@ export function TurnBar() {
         {resolving ? 'RESOLVING…' : 'RESOLVE TURN'}
       </button>
     </div>
+  )
+}
+
+
+function EndGameButton() {
+  const reflecting = useStore((s) => s.reflecting)
+  const endGameAndReflect = useStore((s) => s.endGameAndReflect)
+  return (
+    <button
+      onClick={() => {
+        if (reflecting) return
+        if (!confirm('Force-end this game and run reflection? Lessons will be added to memory.')) return
+        endGameAndReflect({ force: true })
+      }}
+      disabled={reflecting}
+      title="Force-end the game and extract lessons (manual forfeit)"
+      className={[
+        'h-8 px-3 rounded-sm border text-[10px] font-mono tracking-widest mr-2',
+        'transition-colors',
+        reflecting
+          ? 'border-line text-mute opacity-50'
+          : 'border-line text-mute hover:text-fg hover:border-fg/40',
+      ].join(' ')}
+    >
+      {reflecting ? 'REFLECTING…' : 'END & LEARN'}
+    </button>
   )
 }
 
