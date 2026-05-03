@@ -71,7 +71,7 @@ WEAPONS: dict[str, Weapon] = {
     ),
     "bomb": Weapon(
         key="bomb", display="Heavy Bombs", kind="bomb",
-        range=2, damage=4, ammo=2,
+        range=2, damage=4, ammo=5,
         target_domains=("land", "sea"),
         notes="Highest single-hit damage. No anti-air capability.",
     ),

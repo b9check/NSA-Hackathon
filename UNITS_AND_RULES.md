@@ -202,7 +202,7 @@ advantage at long range.
 
 | Weapon       | Range | Damage | Ammo | Hits         |
 |--------------|-------|--------|------|--------------|
-| heavy bombs  | 2     | 4      | 2    | ground, sea  |
+| heavy bombs  | 2     | 4      | 5    | ground, sea  |
 
 Slow, fragile-ish, tiny magazine, but the hardest hitter in the game per
 shot. No air-to-air capability — needs fighter cover. Cannot dogfight
@@ -250,7 +250,7 @@ mechanic) is set per-instance in the scenario, not by base subtype.
 | scout_drone      | air | 1  | 4  | 2*   | —     | —       | —       | —    | -       |
 | strike_drone     | air | 1  | 3  | 1    | —     | 1†      | 3       | 1    | -       |
 | fighter          | air | 3  | 4  | 1    | 3     | 3       | 2       | 4    | Y       |
-| bomber           | air | 5  | 2  | 1    | —     | 2       | 4       | 2    | -       |
+| bomber           | air | 5  | 2  | 1    | —     | 2       | 4       | 5    | -       |
 | destroyer        | sea | 8  | 2  | 1    | 3     | 4       | 2       | 6    | -       |
 | base             | fix | 12 | 0  | 2    | 4     | 2       | 1       | ∞    | -       |
 
