@@ -188,9 +188,16 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       await fetchJson('/api/region/' + key, { method: 'POST' })
       // Bumping the version triggers App + MapStage to refetch / remount.
+      // Also clear per-match state (event log + queued orders + game-over)
+      // so the footer doesn't show events from a different scenario.
       set({
         assetVersion: get().assetVersion + 1,
         selectedUnitId: null,
+        eventLog: [],
+        pendingOrders: {},
+        targeting: null,
+        gameOver: null,
+        hotseatReplay: null,
       })
       await get().refetchState()
     } catch (e: any) {
@@ -205,9 +212,16 @@ export const useStore = create<AppState>((set, get) => ({
     set({ swapping: true, swapError: null })
     try {
       await fetchJson('/api/reroll', { method: 'POST' })
+      // Same per-match reset as swapRegion — fresh seed = new scenario,
+      // old battle log no longer applies.
       set({
         assetVersion: get().assetVersion + 1,
         selectedUnitId: null,
+        eventLog: [],
+        pendingOrders: {},
+        targeting: null,
+        gameOver: null,
+        hotseatReplay: null,
       })
       await get().refetchState()
     } catch (e: any) {
@@ -377,7 +391,14 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  resetMatch: () => set({ gameOver: null }),
+  resetMatch: () => set({
+    gameOver: null,
+    eventLog: [],
+    pendingOrders: {},
+    targeting: null,
+    selectedUnitId: null,
+    hotseatReplay: null,
+  }),
 
   endMatch: (info) => set({ gameOver: info }),
 }))
