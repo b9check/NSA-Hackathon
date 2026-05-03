@@ -35,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=101)
     parser.add_argument("--save-path", default="rl/overwatch_bc_agent")
     parser.add_argument("--log-dir", default="rl/logs/imitation")
+    parser.add_argument("--weight-obs-scale", type=float, default=1.0)
     return parser.parse_args()
 
 
@@ -44,7 +45,10 @@ def collect_demos(args: argparse.Namespace) -> tuple[np.ndarray, np.ndarray]:
     episode_idx = 0
     for _name, weights in REGIMES:
         for _ in range(args.episodes_per_regime):
-            env = OverwatchEnv(max_steps=args.steps)
+            env = OverwatchEnv(
+                max_steps=args.steps,
+                weight_obs_scale=args.weight_obs_scale,
+            )
             env.set_reward_weights(weights)
             obs, _info = env.reset(seed=args.seed + episode_idx)
             for _step in range(args.steps):
@@ -101,7 +105,10 @@ def main() -> None:
     observations, actions = collect_demos(args)
     print(f"collected observations={observations.shape} actions={actions.shape}")
 
-    env = Monitor(OverwatchEnv(), filename=str(Path(args.log_dir) / "monitor.csv"))
+    env = Monitor(
+        OverwatchEnv(weight_obs_scale=args.weight_obs_scale),
+        filename=str(Path(args.log_dir) / "monitor.csv"),
+    )
     model = PPO("MlpPolicy", env, verbose=1, n_steps=2048, seed=args.seed)
     behavior_clone(
         model,

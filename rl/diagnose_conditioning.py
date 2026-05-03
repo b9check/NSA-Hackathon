@@ -45,13 +45,17 @@ def parse_args() -> argparse.Namespace:
         default="model",
         help="Policy used to collect fixed battlefield states.",
     )
+    parser.add_argument("--weight-obs-scale", type=float, default=1.0)
     return parser.parse_args()
 
 
 def collect_states(args: argparse.Namespace, model: PPO) -> list[np.ndarray]:
     states: list[np.ndarray] = []
     for seed in range(args.seeds):
-        env = OverwatchEnv(max_steps=args.steps_per_seed)
+        env = OverwatchEnv(
+            max_steps=args.steps_per_seed,
+            weight_obs_scale=args.weight_obs_scale,
+        )
         # Use neutral-ish weights while collecting states; the diagnostic swaps
         # the tail afterward.
         env.set_reward_weights([0.5, -0.5, 0.5, -0.2])
@@ -88,7 +92,11 @@ def argmax_action(probs: list[np.ndarray]) -> tuple[int, ...]:
     return tuple(int(np.argmax(head)) for head in probs)
 
 
-def compare_regimes(model: PPO, states: list[np.ndarray]) -> list[Comparison]:
+def scaled_weights(weights: list[float], scale: float) -> np.ndarray:
+    return np.asarray(weights, dtype=np.float32) * scale
+
+
+def compare_regimes(model: PPO, states: list[np.ndarray], scale: float) -> list[Comparison]:
     regime_names = list(REGIMES)
     regime_probs: dict[str, list[list[np.ndarray]]] = {name: [] for name in regime_names}
     regime_argmax: dict[str, list[tuple[int, ...]]] = {name: [] for name in regime_names}
@@ -96,7 +104,7 @@ def compare_regimes(model: PPO, states: list[np.ndarray]) -> list[Comparison]:
     for base_obs in states:
         for name, weights in REGIMES.items():
             obs = base_obs.copy()
-            obs[-4:] = np.asarray(weights, dtype=np.float32)
+            obs[-4:] = scaled_weights(weights, scale)
             probs = distribution_probs(model, obs)
             regime_probs[name].append(probs)
             regime_argmax[name].append(argmax_action(probs))
@@ -134,13 +142,13 @@ def compare_regimes(model: PPO, states: list[np.ndarray]) -> list[Comparison]:
     return comparisons
 
 
-def print_initial_state_probe(model: PPO) -> None:
-    env = OverwatchEnv()
+def print_initial_state_probe(model: PPO, scale: float) -> None:
+    env = OverwatchEnv(weight_obs_scale=scale)
     obs, _info = env.reset(seed=0)
     print("single_initial_state_probe:")
     for name, weights in REGIMES.items():
         test_obs = obs.copy()
-        test_obs[-4:] = np.asarray(weights, dtype=np.float32)
+        test_obs[-4:] = scaled_weights(weights, scale)
         probs = distribution_probs(model, test_obs)
         action = argmax_action(probs)
         decoded = decode_action(np.asarray(action, dtype=np.int64))
@@ -155,10 +163,11 @@ def print_initial_state_probe(model: PPO) -> None:
 def main() -> None:
     args = parse_args()
     model = PPO.load(args.model)
-    print_initial_state_probe(model)
+    print(f"weight_obs_scale={args.weight_obs_scale}")
+    print_initial_state_probe(model, args.weight_obs_scale)
     states = collect_states(args, model)
     print(f"\ncollected_states={len(states)} collector={args.collector}")
-    for comparison in compare_regimes(model, states):
+    for comparison in compare_regimes(model, states, args.weight_obs_scale):
         print(
             f"{comparison.left} vs {comparison.right}: "
             f"mean_prob_delta={comparison.mean_prob_delta:.6f} "

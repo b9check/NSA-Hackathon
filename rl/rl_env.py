@@ -92,22 +92,35 @@ class OverwatchEnv(gym.Env):
         grid_size: int = 10,
         max_steps: int = 75,
         render_mode: str | None = None,
+        weight_obs_scale: float = 1.0,
     ) -> None:
         super().__init__()
         if grid_size < 8:
             raise ValueError("grid_size must be at least 8")
+        if weight_obs_scale <= 0:
+            raise ValueError("weight_obs_scale must be positive")
         self.width = grid_size
         self.height = grid_size
         self.max_steps = max_steps
         self.render_mode = render_mode
+        self.weight_obs_scale = float(weight_obs_scale)
 
         self.action_space = spaces.MultiDiscrete([5, 3, 5, 3, 5, 3, 2])
         self.grid_channels = 6
         self.obs_size = self.grid_channels * self.height * self.width + 4
+        obs_low = np.full((self.obs_size,), -1.0, dtype=np.float32)
+        obs_high = np.full((self.obs_size,), 1.0, dtype=np.float32)
+        obs_low[-4:] = np.array(
+            [-1.0, -1.0, 0.0, -1.0],
+            dtype=np.float32,
+        ) * self.weight_obs_scale
+        obs_high[-4:] = np.array(
+            [1.0, 0.0, 1.0, 0.0],
+            dtype=np.float32,
+        ) * self.weight_obs_scale
         self.observation_space = spaces.Box(
-            low=-1.0,
-            high=1.0,
-            shape=(self.obs_size,),
+            low=obs_low,
+            high=obs_high,
             dtype=np.float32,
         )
 
@@ -567,7 +580,10 @@ class OverwatchEnv(gym.Env):
                 grid[4, hvt.y, hvt.x] = min(1.0, hvt.value / 12.0)
             elif self.known_enemy_hvts[hvt.y, hvt.x]:
                 grid[5, hvt.y, hvt.x] = min(1.0, hvt.value / 12.0)
-        weights = np.array([self.w_enemy, self.w_own, self.w_info, self.w_time], dtype=np.float32)
+        weights = np.array(
+            [self.w_enemy, self.w_own, self.w_info, self.w_time],
+            dtype=np.float32,
+        ) * self.weight_obs_scale
         return np.concatenate([grid.ravel(), weights]).astype(np.float32)
 
     def _info(self) -> dict[str, Any]:

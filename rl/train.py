@@ -22,13 +22,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--log-dir", default="rl/logs")
     parser.add_argument("--checkpoint-freq", type=int, default=50_000)
+    parser.add_argument("--weight-obs-scale", type=float, default=1.0)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     Path(args.log_dir).mkdir(parents=True, exist_ok=True)
-    env = Monitor(OverwatchEnv(), filename=str(Path(args.log_dir) / "monitor.csv"))
+    env = Monitor(
+        OverwatchEnv(weight_obs_scale=args.weight_obs_scale),
+        filename=str(Path(args.log_dir) / "monitor.csv"),
+    )
     if args.load_path:
         model = PPO.load(args.load_path, env=env, verbose=1)
     else:

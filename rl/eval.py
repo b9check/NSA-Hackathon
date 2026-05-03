@@ -52,6 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--steps", type=int, default=75)
     parser.add_argument("--sleep", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=11)
+    parser.add_argument("--weight-obs-scale", type=float, default=1.0)
     parser.add_argument(
         "--regime",
         choices=["all", *REGIMES.keys()],
@@ -129,7 +130,10 @@ def main() -> None:
     for name, weights in selected_regimes(args.regime).items():
         print("=" * 80)
         print(f"{name.upper()} policy={args.policy} weights={weights}")
-        env = OverwatchEnv(max_steps=args.steps)
+        env = OverwatchEnv(
+            max_steps=args.steps,
+            weight_obs_scale=args.weight_obs_scale,
+        )
         env.set_reward_weights(weights)
         obs, info = env.reset(seed=args.seed)
         start_info = info
