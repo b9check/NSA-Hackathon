@@ -335,34 +335,91 @@ async function buildPixi(
     const nodeFor = (id: string) => unitNodes.get(id) ?? baseNodes.get(id)
 
     // Visibility filter for replay: in side-views, hide enemy actions
-    // whose origin/path/target the observer can't sense. We compute the
-    // observer's PRE-RESOLVE sensor coverage (using baseState) once;
-    // good enough for v1 — accurate fog would re-derive coverage per
-    // step, which is overkill.
+    // whose origin / path / target the observer can't sense. Coverage
+    // is DYNAMIC — it grows as the observer's own units advance, so
+    // enemies caught by an advancing sensor get revealed on the spot.
     const replayViewMode = useStore.getState().viewMode
     const observerSide: 'blue' | 'red' | null =
       replayViewMode === 'blue' || replayViewMode === 'red' ? replayViewMode : null
-    const observerVisible: Set<string> = (() => {
-      if (!observerSide) return new Set<string>()
-      const s = new Set<string>()
+
+    // Live position of every unit, updated as moves animate. Starts at
+    // baseState (pre-resolve).
+    const livePos = new Map<string, { col: number; row: number }>()
+    for (const u of baseState.units) livePos.set(u.id, { col: u.col, row: u.row })
+
+    let liveCoverage: Set<string> = new Set<string>()
+    const rebuildCoverage = () => {
+      liveCoverage = new Set<string>()
+      if (!observerSide) return
       const sources: Array<{ col: number; row: number; sensor: number }> = []
       for (const u of baseState.units) {
-        if (u.side === observerSide) sources.push({ col: u.col, row: u.row, sensor: u.sensor })
+        if (u.side !== observerSide) continue
+        const p = livePos.get(u.id)!
+        sources.push({ col: p.col, row: p.row, sensor: u.sensor })
       }
       for (const b of (baseState.bases ?? [])) {
-        if (b.side === observerSide) sources.push({ col: b.col, row: b.row, sensor: b.sensor })
+        if (b.side === observerSide) {
+          sources.push({ col: b.col, row: b.row, sensor: b.sensor })
+        }
       }
       for (const src of sources) {
         for (const cell of baseState.map.cells) {
           if (hexDistance(src.col, src.row, cell.col, cell.row) <= src.sensor) {
-            s.add(`${cell.col},${cell.row}`)
+            liveCoverage.add(`${cell.col},${cell.row}`)
           }
         }
       }
-      return s
-    })()
+    }
     const isVisible = (col: number, row: number) =>
-      !observerSide || observerVisible.has(`${col},${row}`)
+      !observerSide || liveCoverage.has(`${col},${row}`)
+
+    // Track which enemy entities have been revealed (made visible to
+    // the observer) so we don't re-flash them on each coverage update.
+    const revealed = new Set<string>()
+    const revealEnemiesInCoverage = async () => {
+      if (!observerSide) return
+      const newly: Array<{ id: string; col: number; row: number }> = []
+      for (const u of baseState.units) {
+        if (u.side === observerSide) continue
+        const p = livePos.get(u.id)!
+        if (!liveCoverage.has(`${p.col},${p.row}`)) continue
+        if (revealed.has(u.id)) continue
+        revealed.add(u.id)
+        const node = unitNodes.get(u.id)
+        if (node) {
+          const c = cellCenters.get(`${p.col},${p.row}`)
+          if (c) { node.container.x = c.x; node.container.y = c.y }
+          node.container.visible = true
+          node.container.alpha = 0
+          newly.push({ id: u.id, col: p.col, row: p.row })
+        }
+      }
+      for (const b of (baseState.bases ?? [])) {
+        if (b.side === observerSide) continue
+        if (!liveCoverage.has(`${b.col},${b.row}`)) continue
+        if (revealed.has(b.id)) continue
+        revealed.add(b.id)
+        const node = baseNodes.get(b.id)
+        if (node) {
+          node.container.visible = true
+          node.container.alpha = 0
+          newly.push({ id: b.id, col: b.col, row: b.row })
+        }
+      }
+      // Light fade-in so the player notices a discovery without it
+      // feeling abrupt.
+      if (newly.length > 0) {
+        const targets = newly
+          .map((n) => unitNodes.get(n.id)?.container ?? baseNodes.get(n.id)?.container)
+          .filter((c): c is Container => !!c)
+        await Promise.all(targets.map((c) => tween(c, { alpha: 1 }, 250, easeOutCubic)))
+      }
+    }
+
+    rebuildCoverage()
+    // Don't await initial reveal — the initial fog already handled what
+    // was visible pre-replay; this catches anything we missed.
+    revealEnemiesInCoverage().catch(() => {})
 
     for (const ev of events) {
       switch (ev.type) {
@@ -371,30 +428,47 @@ async function buildPixi(
           if (!node) break
           const u = unitsById.get(ev.unit)
           if (!u) break
-          // Fog: if the mover is enemy from observer's POV, only animate
-          // the portion of the path that's actually sensed. If NO step
+          const isEnemy = observerSide !== null && u.side !== observerSide
+          const last = ev.path[ev.path.length - 1]
+          // Fog: if the mover is enemy from observer's POV and NO step
           // is sensed, snap silently to the destination (no arrow, no
           // animation) — observer never saw it move.
-          const isEnemy = observerSide !== null && u.side !== observerSide
           const stepVisible = ev.path.map((h: [number, number]) => isVisible(h[0], h[1]))
           if (isEnemy && !stepVisible.some((v: boolean) => v)) {
-            // Silent off-screen move.
-            const last = ev.path[ev.path.length - 1]
             const c = cellCenters.get(`${last[0]},${last[1]}`)
             if (c) { node.container.x = c.x; node.container.y = c.y }
+            livePos.set(ev.unit, { col: last[0], row: last[1] })
             break
           }
           const path = ev.path.map((h: [number, number]) => {
             const c = cellCenters.get(`${h[0]},${h[1]}`)
             return c ? { x: c.x, y: c.y } : { x: node.container.x, y: node.container.y }
           })
-          await animateMovePath(
-            node.container, path, moveMsPerHex(u), false,
-            // Pass undefined for the side colour when the mover is enemy
-            // and we shouldn't draw the dashed track / arrowhead trail.
-            isEnemy ? undefined : fxLayer,
-            isEnemy ? undefined : SIDE_COLOR[u.side],
-          )
+          // Friendly mover: animate step-by-step so the dynamic coverage
+          // gets to expand mid-move and surface enemies as we approach.
+          if (!isEnemy && ev.path.length >= 2) {
+            for (let i = 1; i < ev.path.length; i++) {
+              const seg = [path[i - 1], path[i]]
+              await animateMovePath(
+                node.container, seg, moveMsPerHex(u), false,
+                fxLayer, SIDE_COLOR[u.side],
+              )
+              livePos.set(ev.unit, { col: ev.path[i][0], row: ev.path[i][1] })
+              rebuildCoverage()
+              await revealEnemiesInCoverage()
+            }
+          } else {
+            await animateMovePath(
+              node.container, path, moveMsPerHex(u), false,
+              isEnemy ? undefined : fxLayer,
+              isEnemy ? undefined : SIDE_COLOR[u.side],
+            )
+            livePos.set(ev.unit, { col: last[0], row: last[1] })
+            // Enemy moves can also walk into our coverage and become visible.
+            if (isEnemy) {
+              await revealEnemiesInCoverage()
+            }
+          }
           break
         }
         case 'strike': {
