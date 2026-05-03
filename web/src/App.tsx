@@ -4,32 +4,32 @@ import { MapStage } from './components/MapStage'
 import { TopBar, RightRail } from './components/HUD'
 import { TurnBar } from './components/TurnBar'
 import { EndGameOverlay } from './components/EndGameOverlay'
-import { useMatchTimer } from './components/Timer'
 import { BattleLog } from './components/BattleLog'
 
 
-/** Watch turnInfo for annihilation conditions and end the match if so. */
-function useAnnihilationCheck() {
-  const turnInfo = useStore((s) => s.turnInfo)
+/** Watch the engine-authoritative game.winner field and surface the
+ *  EndGameOverlay once the resolver declares a victor. */
+function useWinCheck() {
   const game = useStore((s) => s.game)
+  const turnInfo = useStore((s) => s.turnInfo)
+  const replaying = useStore((s) => s.replaying)
   const gameOver = useStore((s) => s.gameOver)
-  const matchStarted = useStore((s) => s.matchStarted)
   const endMatch = useStore((s) => s.endMatch)
   useEffect(() => {
-    if (!turnInfo || !game || gameOver || !matchStarted) return
-    if (turnInfo.blue_score <= 0 || turnInfo.red_score <= 0) {
-      const winner =
-        turnInfo.blue_score === turnInfo.red_score ? 'draw' :
-        turnInfo.blue_score > turnInfo.red_score ? 'blue' : 'red'
-      endMatch({
-        winner,
-        reason: 'annihilation',
-        blue_score: turnInfo.blue_score,
-        red_score: turnInfo.red_score,
-        turn: turnInfo.turn,
-      })
-    }
-  }, [turnInfo?.blue_score, turnInfo?.red_score, gameOver, matchStarted])
+    if (!game || !game.winner || gameOver || replaying) return
+    const startBlue = game.starting_hp?.blue ?? 0
+    const startRed = game.starting_hp?.red ?? 0
+    let blueHp = 0, redHp = 0
+    for (const u of game.units) (u.side === 'blue' ? blueHp += u.hp : redHp += u.hp)
+    for (const b of game.bases) (b.side === 'blue' ? blueHp += b.hp : redHp += b.hp)
+    endMatch({
+      winner: game.winner,
+      reason: (game.win_reason ?? 'turn_cap') as any,
+      blue_hp_pct: startBlue ? blueHp / startBlue : 0,
+      red_hp_pct: startRed ? redHp / startRed : 0,
+      turn: turnInfo?.turn ?? game.turn,
+    })
+  }, [game?.winner, game?.win_reason, replaying, gameOver])
 }
 
 
@@ -72,12 +72,18 @@ function useGlobalShortcuts() {
       const playerSide: 'blue' | 'red' = st.viewMode === 'red' ? 'red' : 'blue'
       if (u.side !== playerSide) return
 
+      // Gate each shortcut on the unit's capability so e.g. pressing S
+      // on a weaponless scout drone doesn't enter STRIKE targeting (it
+      // would just silently fail later when no hex is valid).
+      const canMove   = u.speed > 0
+      const canStrike = u.weapon > 0
+      const canScout  = u.type === 'scout_drone'
+
       const k = e.key.toLowerCase()
-      if (k === 'm') st.startTargeting(u.id, 'MOVE')
-      else if (k === 's') st.startTargeting(u.id, 'STRIKE')
-      else if (k === 'v') st.startTargeting(u.id, 'SCOUT')
-      else if (k === 'c') st.startTargeting(u.id, 'CAPTURE')
-      else if (k === 'o') st.setOrder({ kind: 'OVERWATCH', unit_id: u.id })
+      if (k === 'm' && canMove) st.startTargeting(u.id, 'MOVE')
+      else if (k === 's' && canStrike) st.startTargeting(u.id, 'STRIKE')
+      else if (k === 'v' && canScout) st.setOrder({ kind: 'SCOUT', unit_id: u.id })
+      else if (k === 'o' && canStrike) st.setOrder({ kind: 'OVERWATCH', unit_id: u.id })
       else if (k === 'h') st.setOrder({ kind: 'HOLD', unit_id: u.id })
       else if (k === 'x') st.clearOrder(u.id)
     }
@@ -94,8 +100,7 @@ export default function App() {
   const refetchState = useStore((s) => s.refetchState)
 
   useGlobalShortcuts()
-  useMatchTimer()
-  useAnnihilationCheck()
+  useWinCheck()
 
   // On mount: fetch the region list (for the picker) + the initial state.
   useEffect(() => {
@@ -108,7 +113,7 @@ export default function App() {
       <TopBar />
       <div className="flex-1 flex min-h-0 relative">
         <div className="flex-1 min-w-0 flex flex-col">
-          <div className="flex-1 min-h-0 overflow-auto bg-bg">
+          <div className="flex-1 min-h-0 overflow-auto bg-bg relative">
             {game ? (
               // Key by version so the Pixi stage fully unmounts on region swap
               // and re-loads /terrain.png with a fresh cache-busted URL.
@@ -118,6 +123,7 @@ export default function App() {
                 loading state.json…
               </div>
             )}
+            <HotseatPovBanner />
           </div>
           <TurnBar />
         </div>
@@ -130,6 +136,28 @@ export default function App() {
     </div>
   )
 }
+
+function HotseatPovBanner() {
+  const hr = useStore((s) => s.hotseatReplay)
+  if (!hr || hr.phase === 'settle') return null
+  const isBlue = hr.phase === 'blue'
+  const cls = isBlue ? 'border-blue text-blue' : 'border-red text-red'
+  return (
+    <div
+      className={[
+        'absolute top-3 left-1/2 -translate-x-1/2 z-30',
+        'h-8 px-4 inline-flex items-center gap-3 rounded-sm border',
+        'bg-panel/90 backdrop-blur-sm font-mono text-[11px] tracking-widest',
+        cls,
+      ].join(' ')}
+    >
+      <span className="opacity-70">REPLAY</span>
+      <span className="font-semibold">{hr.phase.toUpperCase()} POV</span>
+      <span className="opacity-50">{isBlue ? '1 / 2' : '2 / 2'}</span>
+    </div>
+  )
+}
+
 
 function SwapOverlay() {
   return (

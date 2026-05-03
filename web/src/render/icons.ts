@@ -6,15 +6,12 @@ import { Assets, Texture } from 'pixi.js'
 // Keys must match either Platform.key or Base.key — the same identifiers
 // scripts/fetch_icons.py wrote SVGs for under web/public/icons/<key>.svg.
 const PLATFORM_KEYS = [
-  'f35a', 'j20', 'mq9', 'recon_uav', 'cg47', 'type055',
-  'patriot', 'hq9', 'm1a2', 'mech_b', 'mech_r', 'shahed',
+  'infantry', 'armor', 'missile_launcher',
+  'scout_drone', 'strike_drone', 'fighter', 'bomber',
+  'destroyer',
 ] as const
 
-const BASE_KEYS = [
-  'blue_airbase', 'red_airbase',
-  'blue_navalbase', 'red_navalbase',
-  'blue_fob', 'red_launchsite',
-] as const
+const BASE_KEYS = ['base'] as const
 
 const textures = new Map<string, Texture>()
 let loaded = false

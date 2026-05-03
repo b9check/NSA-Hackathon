@@ -23,26 +23,17 @@ from pathlib import Path
 # https://raw.githubusercontent.com/game-icons/icons/master/
 # Picked for readability at ~30-40 px on a satellite backdrop.
 ICON_MAP: dict[str, str] = {
-    # ---- Mobile platforms ----
-    "f35a":      "delapouite/jet-fighter.svg",
-    "j20":       "delapouite/jet-fighter.svg",
-    "mq9":       "delapouite/delivery-drone.svg",
-    "recon_uav": "delapouite/delivery-drone.svg",
-    "cg47":      "delapouite/interceptor-ship.svg",
-    "type055":   "delapouite/interceptor-ship.svg",
-    "patriot":   "lorc/missile-pod.svg",
-    "hq9":       "lorc/missile-pod.svg",
-    "m1a2":      "lorc/tank.svg",
-    "mech_b":    "lorc/visored-helm.svg",
-    "mech_r":    "lorc/visored-helm.svg",
-    "shahed":    "lorc/missile-swarm.svg",
-    # ---- Bases ----
-    "blue_airbase":    "delapouite/airplane-departure.svg",
-    "red_airbase":     "delapouite/airplane-departure.svg",
-    "blue_navalbase":  "lorc/anchor.svg",
-    "red_navalbase":   "lorc/anchor.svg",
-    "blue_fob":        "lorc/castle.svg",
-    "red_launchsite":  "lorc/castle.svg",
+    # ---- 9 abstract platform types ----
+    "infantry":         "lorc/visored-helm.svg",
+    "armor":            "lorc/tank.svg",
+    "missile_launcher": "lorc/missile-pod.svg",
+    "scout_drone":      "delapouite/delivery-drone.svg",
+    "strike_drone":     "lorc/missile-swarm.svg",
+    "fighter":          "delapouite/jet-fighter.svg",
+    "bomber":           "delapouite/airplane-arrival.svg",
+    "destroyer":        "delapouite/interceptor-ship.svg",
+    # ---- One base ----
+    "base":             "lorc/castle.svg",
 }
 
 UPSTREAM = "https://raw.githubusercontent.com/game-icons/icons/master/{}"

@@ -28,7 +28,7 @@ from pathlib import Path
 
 REGIONS: dict[str, dict] = {
     "bonifacio": dict(lat=41.30, lng=9.20,    zoom=11,
-                      name="Bonifacio Strait Crisis"),
+                      name="Bonifacio Strait"),
     "aegean":    dict(lat=37.00, lng=25.00,   zoom=10,
                       name="Aegean Archipelago"),
     "hawaii":    dict(lat=20.95, lng=-156.70, zoom=11,

@@ -13,7 +13,6 @@ from engine.state import (
     GameState,
     HexCell,
     MapInfo,
-    Objective,
     SensorRef,
     UnitInstance,
     VictoryConfig,
@@ -40,7 +39,9 @@ def _weapon_refs(keys: tuple[str, ...]) -> list[WeaponRef]:
         w = WEAPONS[k]
         out.append(WeaponRef(
             key=w.key, display=w.display, kind=w.kind, range=w.range,
-            pkill=dict(w.pkill), ammo=w.ammo, notes=w.notes,
+            damage=w.damage, self_destruct=w.self_destruct,
+            target_domains=list(w.target_domains),
+            ammo=w.ammo, notes=w.notes,
         ))
     return out
 
@@ -49,10 +50,11 @@ def _platform_to_unit(u: dict, p: Platform) -> UnitInstance:
     col, row = u["pos"]
     sensors = _sensor_refs(p.sensors)
     weapons = _weapon_refs(p.weapons)
+    side = u["side"]
     return UnitInstance(
         id=u["id"],
         type=p.key,
-        side=p.side,
+        side=side,
         col=int(col),
         row=int(row),
         hp=int(u.get("hp", p.hp)),
@@ -77,10 +79,12 @@ def _base_to_instance(b: dict, bt: Base) -> BaseInstance:
     weapons = _weapon_refs(bt.weapons)
     sensor_max = max((s.range for s in sensors), default=0)
     weapon_max = max((w.range for w in weapons), default=0)
+    side = b["side"]
+    spawns = list(b.get("spawns", bt.spawns))
     return BaseInstance(
         id=b["id"],
         type=bt.key,
-        side=bt.side,
+        side=side,
         col=int(col),
         row=int(row),
         hp=int(b.get("hp", bt.hp)),
@@ -90,7 +94,7 @@ def _base_to_instance(b: dict, bt: Base) -> BaseInstance:
         domain=bt.domain,
         glyph=bt.glyph,
         capacity=bt.capacity,
-        spawns=list(bt.spawns),
+        spawns=spawns,
         sensor=sensor_max,
         weapon=weapon_max,
         sensors=sensors,
@@ -126,14 +130,7 @@ def load_scenario(path: str | Path) -> GameState:
                 HexCell(col=col_idx, row=row_idx, terrain=TERRAIN_FROM_CHAR[ch])
             )
 
-    objectives = [
-        Objective(col=int(c), row=int(r))
-        for c, r in map_block.get("objective_hexes", [])
-    ]
-
-    map_info = MapInfo(
-        cols=cols, rows=rows, cells=cells, objective_hexes=objectives,
-    )
+    map_info = MapInfo(cols=cols, rows=rows, cells=cells)
 
     unit_instances: list[UnitInstance] = []
     for u in raw.get("units", []):
@@ -152,10 +149,13 @@ def load_scenario(path: str | Path) -> GameState:
     victory = VictoryConfig(**raw.get("victory", {}))
 
     starting_total: dict[str, float] = {"blue": 0.0, "red": 0.0}
+    starting_hp: dict[str, int] = {"blue": 0, "red": 0}
     for u in unit_instances:
         starting_total[u.side] += u.cost
+        starting_hp[u.side] += u.max_hp
     for b in base_instances:
         starting_total[b.side] += 50.0  # bases worth 50 each (matches resolver)
+        starting_hp[b.side] += b.max_hp
 
     return GameState(
         name=raw["name"],
@@ -167,5 +167,5 @@ def load_scenario(path: str | Path) -> GameState:
         bases=base_instances,
         victory=victory,
         starting_total=starting_total,
-        objective_points={"blue": 0.0, "red": 0.0},
+        starting_hp=starting_hp,
     )
