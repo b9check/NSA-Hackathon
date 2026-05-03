@@ -833,8 +833,31 @@ function commitTargetingClick(
       if (unit.weapon <= 0) return rejectClick('no weapons', hex, game)
       if (hexDistance(unit.col, unit.row, hex.col, hex.row) > unit.weapon)
         return rejectClick('out of weapon range', hex, game)
-      // STRIKE is hex-targeted now: damage applies to every enemy on the hex
-      // after MOVE. Whiff (empty hex) still consumes ammo.
+      // Domain check: if there ARE enemies on the hex but none match the
+      // weapon's target_domains, reject up front instead of letting the
+      // engine silently whiff. (e.g. SAM strikes ground infantry.)
+      const w = unit.weapons[0]
+      if (w && w.target_domains && w.target_domains.length > 0) {
+        const enemiesOnHex = game.units.filter(
+          (u) => u.side !== unit.side && u.col === hex.col && u.row === hex.row,
+        )
+        const basesOnHex = (game.bases ?? []).filter(
+          (b) => b.side !== unit.side && b.col === hex.col && b.row === hex.row,
+        )
+        if (enemiesOnHex.length > 0 || basesOnHex.length > 0) {
+          const anyHittable =
+            enemiesOnHex.some((u) => w.target_domains.includes(u.domain)) ||
+            basesOnHex.some(() => w.target_domains.includes('land'))
+          if (!anyHittable) {
+            return rejectClick(
+              `${w.display} can only hit ${w.target_domains.join('/')}`,
+              hex, game,
+            )
+          }
+        }
+      }
+      // STRIKE is hex-targeted: damage applies to every enemy on the hex
+      // after MOVE. Whiff (empty hex / target moved) still consumes ammo.
       setOrder({
         kind: 'STRIKE', unit_id: unit.id, target_hex: [hex.col, hex.row],
       })
@@ -924,9 +947,10 @@ export function MapStage() {
         await handlesRef.current!.playEvents(pendingEvents, game)
       } finally {
         if (cancelled) return
-        useStore.getState().setPendingEvents(null)
-        useStore.getState().setReplaying(false)
-        useStore.getState().refetchState().catch(() => {})
+        // The store decides what comes next: in hot-seat mode it
+        // orchestrates a 2nd POV pass; otherwise it refetches and
+        // settles. This keeps replay-completion logic in one place.
+        useStore.getState().onReplayComplete()
       }
     })()
     return () => { cancelled = true }

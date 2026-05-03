@@ -35,6 +35,8 @@ export interface WeaponRef {
   range: number
   damage: number
   self_destruct: boolean
+  /** Which target domains this weapon can damage. Empty/missing => any. */
+  target_domains: string[]
   ammo: number
   notes: string
 }

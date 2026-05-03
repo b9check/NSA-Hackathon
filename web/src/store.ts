@@ -50,6 +50,16 @@ interface AppState {
   /** True while MapStage is mid-replay; redraw() short-circuits so
    *  syncUnits doesn't snap positions and clobber move tweens. */
   replaying: boolean
+  /** Hot-seat two-POV replay. After resolve in real-game mode the
+   *  animation plays once per side. The store snapshots the pre-resolve
+   *  state, then orchestrates pass 1 (BLUE), pass 2 (RED), and finally
+   *  refetches the resolver's truth and settles back to BLUE. */
+  hotseatReplay: null | {
+    phase: 'blue' | 'red' | 'settle'
+    events: any[]
+    /** Pre-resolve state, used to start each pass from the same point. */
+    snapshot: GameState
+  }
 
   gameOver: GameOverInfo | null
 
@@ -86,6 +96,10 @@ interface AppState {
 
   setPendingEvents: (events: any[] | null) => void
   setReplaying: (b: boolean) => void
+  /** Called by MapStage when an animation pass completes. In hot-seat
+   *  mode, advances the two-POV replay; in normal mode, refetches
+   *  state.json and settles. */
+  onReplayComplete: () => void
 
   resetMatch: () => void
   endMatch: (info: GameOverInfo | null) => void
@@ -134,6 +148,7 @@ export const useStore = create<AppState>((set, get) => ({
   resolving: false,
   pendingEvents: null,
   replaying: false,
+  hotseatReplay: null,
   gameOver: null,
   eventLog: [],
 
@@ -271,22 +286,40 @@ export const useStore = create<AppState>((set, get) => ({
       const annotated: AnnotatedEvent[] = events.map(
         (e: any, i: number) => ({ ...e, _turn: startTurn, _seq: seqBase + i }),
       )
-      // Stage events for the MapStage replay. It clears them when done
-      // and triggers a refetchState() to snap to the resolver's truth.
-      // - Normal (omni-allowed) mode: flip back to OMNI so the player
-      //   watches the resolution from above.
-      // - Hot-seat mode: snap back to BLUE so the next turn starts with
-      //   blue queueing (the TurnBar's blue-locks-then-flip-to-red flow
-      //   does the rest).
-      const next: Partial<AppState> = {
-        pendingOrders: {},
-        targeting: null,
-        pendingEvents: events,
-        eventLog: [...get().eventLog, ...annotated].slice(-200),
-        selectedUnitId: null,
-        viewMode: get().realGame ? 'blue' : 'omniscient',
+      const baseState = get().game
+      const realGame = get().realGame
+      if (realGame && baseState) {
+        // Hot-seat: animate twice — once from BLUE POV, once from RED.
+        // Snapshot the pre-resolve state so each pass starts from the
+        // same baseline. MapStage's onReplayComplete advances the
+        // phases (blue -> red -> settle).
+        const snapshot = JSON.parse(JSON.stringify(baseState)) as GameState
+        set({
+          pendingOrders: {},
+          targeting: null,
+          pendingEvents: [...events],
+          eventLog: [...get().eventLog, ...annotated].slice(-200),
+          selectedUnitId: null,
+          viewMode: 'blue',
+          game: snapshot,
+          hotseatReplay: {
+            phase: 'blue',
+            events: [...events],
+            snapshot,
+          },
+        })
+      } else {
+        // Normal flow — single pass; MapStage refetches state on
+        // completion and settles to OMNI.
+        set({
+          pendingOrders: {},
+          targeting: null,
+          pendingEvents: events,
+          eventLog: [...get().eventLog, ...annotated].slice(-200),
+          selectedUnitId: null,
+          viewMode: 'omniscient',
+        })
       }
-      set(next as any)
     } catch (e) {
       console.error('resolveTurn failed', e)
     } finally {
@@ -296,6 +329,41 @@ export const useStore = create<AppState>((set, get) => ({
 
   setPendingEvents: (events) => set({ pendingEvents: events }),
   setReplaying: (b) => set({ replaying: b }),
+
+  onReplayComplete: () => {
+    const hr = get().hotseatReplay
+    if (!hr) {
+      // Normal flow: clear and refetch.
+      set({ pendingEvents: null, replaying: false })
+      get().refetchState().catch(() => {})
+      return
+    }
+    if (hr.phase === 'blue') {
+      // Pass 1 done — start RED pass from the same snapshot.
+      const fresh = JSON.parse(JSON.stringify(hr.snapshot))
+      set({
+        replaying: false,
+        viewMode: 'red',
+        game: fresh,
+        pendingEvents: [...hr.events],
+        hotseatReplay: { ...hr, phase: 'red' },
+      })
+    } else if (hr.phase === 'red') {
+      // Pass 2 done — refetch resolver truth and settle on BLUE.
+      set({
+        replaying: false,
+        pendingEvents: null,
+        hotseatReplay: { ...hr, phase: 'settle' },
+        viewMode: 'blue',
+      })
+      get().refetchState().finally(() => {
+        set({ hotseatReplay: null })
+      })
+    } else {
+      // Already settling — no-op safeguard.
+      set({ pendingEvents: null, replaying: false, hotseatReplay: null })
+    }
+  },
 
   resetMatch: () => set({ gameOver: null }),
 

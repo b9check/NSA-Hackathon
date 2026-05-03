@@ -113,7 +113,7 @@ export default function App() {
       <TopBar />
       <div className="flex-1 flex min-h-0 relative">
         <div className="flex-1 min-w-0 flex flex-col">
-          <div className="flex-1 min-h-0 overflow-auto bg-bg">
+          <div className="flex-1 min-h-0 overflow-auto bg-bg relative">
             {game ? (
               // Key by version so the Pixi stage fully unmounts on region swap
               // and re-loads /terrain.png with a fresh cache-busted URL.
@@ -123,6 +123,7 @@ export default function App() {
                 loading state.json…
               </div>
             )}
+            <HotseatPovBanner />
           </div>
           <TurnBar />
         </div>
@@ -135,6 +136,28 @@ export default function App() {
     </div>
   )
 }
+
+function HotseatPovBanner() {
+  const hr = useStore((s) => s.hotseatReplay)
+  if (!hr || hr.phase === 'settle') return null
+  const isBlue = hr.phase === 'blue'
+  const cls = isBlue ? 'border-blue text-blue' : 'border-red text-red'
+  return (
+    <div
+      className={[
+        'absolute top-3 left-1/2 -translate-x-1/2 z-30',
+        'h-8 px-4 inline-flex items-center gap-3 rounded-sm border',
+        'bg-panel/90 backdrop-blur-sm font-mono text-[11px] tracking-widest',
+        cls,
+      ].join(' ')}
+    >
+      <span className="opacity-70">REPLAY</span>
+      <span className="font-semibold">{hr.phase.toUpperCase()} POV</span>
+      <span className="opacity-50">{isBlue ? '1 / 2' : '2 / 2'}</span>
+    </div>
+  )
+}
+
 
 function SwapOverlay() {
   return (
