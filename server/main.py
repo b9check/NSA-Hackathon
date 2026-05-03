@@ -488,3 +488,34 @@ async def reset_turn() -> dict:
     async with _session_lock:
         _reset_orders()
     return {"ok": True}
+
+
+class SensorToggleBody(BaseModel):
+    unit_id: str
+    sensor_key: str = ""   # empty = toggle all togglable (radar) sensors
+    active: bool
+
+
+@app.post("/api/sensor/toggle")
+async def toggle_sensor(body: SensorToggleBody) -> dict:
+    """Immediately set is_active on a unit's radar sensor(s). Free action,
+    not gated by turn submission. Refreshes the unit's `sensor` summary so
+    visibility is recomputed without needing a resolve."""
+    state = _ensure_state()
+    unit = next((u for u in state.units if u.id == body.unit_id), None)
+    if not unit:
+        raise HTTPException(404, f"unit {body.unit_id} not found")
+    touched = 0
+    for s in unit.sensors:
+        if s.modality != "radar":
+            continue   # only radars are togglable
+        if body.sensor_key and s.key != body.sensor_key:
+            continue
+        s.is_active = bool(body.active)
+        touched += 1
+    if touched == 0:
+        raise HTTPException(400, "no togglable radar sensor matched")
+    # Recompute summary range from active sensors only
+    unit.sensor = max((s.range for s in unit.sensors if s.is_active), default=0)
+    _persist_state()
+    return {"ok": True, "unit_id": unit.id, "sensor_summary_range": unit.sensor}

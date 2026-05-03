@@ -48,10 +48,24 @@ class HoldOrder(_BaseOrder):
     kind: Literal["HOLD"] = "HOLD"
 
 
+class ActivateOrder(_BaseOrder):
+    """Toggle a unit's radar sensor ON. Free action — does not preclude movement.
+    `sensor_key` empty = all togglable (radar) sensors on the unit."""
+    kind: Literal["ACTIVATE"] = "ACTIVATE"
+    sensor_key: str = ""
+
+
+class DeactivateOrder(_BaseOrder):
+    """Toggle a unit's radar sensor OFF. Free action."""
+    kind: Literal["DEACTIVATE"] = "DEACTIVATE"
+    sensor_key: str = ""
+
+
 Order = Annotated[
     Union[
         MoveOrder, StrikeOrder, ScoutOrder,
         OverwatchOrder, HoldOrder,
+        ActivateOrder, DeactivateOrder,
     ],
     Field(discriminator="kind"),
 ]

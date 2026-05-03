@@ -27,7 +27,7 @@ map:
 
 victory:
   hp_loss_threshold: 0.25
-  turn_cap: 30
+  turn_cap: 20
 
 # Mobile units (auto-placed by scripts/sample_terrain.py per seed).
 units:
