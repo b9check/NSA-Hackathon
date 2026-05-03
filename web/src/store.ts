@@ -273,18 +273,18 @@ export const useStore = create<AppState>((set, get) => ({
       )
       // Stage events for the MapStage replay. It clears them when done
       // and triggers a refetchState() to snap to the resolver's truth.
-      // In normal (omni-allowed) mode, flip back to OMNI so the player
-      // watches the resolution from above. In real-game mode, leave the
-      // viewMode alone — the next-side hand-off is the player's choice.
+      // - Normal (omni-allowed) mode: flip back to OMNI so the player
+      //   watches the resolution from above.
+      // - Hot-seat mode: snap back to BLUE so the next turn starts with
+      //   blue queueing (the TurnBar's blue-locks-then-flip-to-red flow
+      //   does the rest).
       const next: Partial<AppState> = {
         pendingOrders: {},
         targeting: null,
         pendingEvents: events,
         eventLog: [...get().eventLog, ...annotated].slice(-200),
         selectedUnitId: null,
-      }
-      if (!get().realGame) {
-        next.viewMode = 'omniscient'
+        viewMode: get().realGame ? 'blue' : 'omniscient',
       }
       set(next as any)
     } catch (e) {
