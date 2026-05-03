@@ -37,6 +37,12 @@ export async function animateMovePath(
   rotateSprite: boolean = false,
   fxLayer?: Container,
   pathColor?: number,
+  /** Optional per-step callback fired AFTER the unit reaches waypoint i.
+   *  Lets the caller update side state (e.g. recompute fog coverage and
+   *  reveal newly-sensed enemies) between segments without having to
+   *  call animateMovePath once per segment (which multiplies the
+   *  cleanup-fade overhead and makes pass timing asymmetric). */
+  onStep?: (i: number) => void | Promise<void>,
 ): Promise<void> {
   if (path.length < 2 || msPerHex <= 0) return
   // Optional dashed track + arrowhead.
@@ -70,16 +76,16 @@ export async function animateMovePath(
       }
       traveledGfx.stroke({ color: pathColor, width: 2, alpha: 0.85 })
     }
+    if (onStep) await onStep(i)
   }
-  // Fade + cleanup.
-  if (pathGfx) {
-    await tween(pathGfx, { alpha: 0 }, 400, easeOutCubic)
-    pathGfx.destroy()
-  }
-  if (traveledGfx) {
-    await tween(traveledGfx, { alpha: 0 }, 400, easeOutCubic)
-    traveledGfx.destroy()
-  }
+  // Fade + cleanup. Run both fades in parallel — they're cosmetic, no
+  // need to add another full envelope to the move duration.
+  const fades: Promise<void>[] = []
+  if (pathGfx) fades.push(tween(pathGfx, { alpha: 0 }, 250, easeOutCubic))
+  if (traveledGfx) fades.push(tween(traveledGfx, { alpha: 0 }, 250, easeOutCubic))
+  if (fades.length) await Promise.all(fades)
+  pathGfx?.destroy()
+  traveledGfx?.destroy()
 }
 
 

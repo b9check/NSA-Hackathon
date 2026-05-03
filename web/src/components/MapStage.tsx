@@ -443,30 +443,27 @@ async function buildPixi(
             const c = cellCenters.get(`${h[0]},${h[1]}`)
             return c ? { x: c.x, y: c.y } : { x: node.container.x, y: node.container.y }
           })
-          // Friendly mover: animate step-by-step so the dynamic coverage
-          // gets to expand mid-move and surface enemies as we approach.
-          if (!isEnemy && ev.path.length >= 2) {
-            for (let i = 1; i < ev.path.length; i++) {
-              const seg = [path[i - 1], path[i]]
-              await animateMovePath(
-                node.container, seg, moveMsPerHex(u), false,
-                fxLayer, SIDE_COLOR[u.side],
-              )
-              livePos.set(ev.unit, { col: ev.path[i][0], row: ev.path[i][1] })
-              rebuildCoverage()
-              await revealEnemiesInCoverage()
-            }
-          } else {
-            await animateMovePath(
-              node.container, path, moveMsPerHex(u), false,
-              isEnemy ? undefined : fxLayer,
-              isEnemy ? undefined : SIDE_COLOR[u.side],
-            )
-            livePos.set(ev.unit, { col: last[0], row: last[1] })
-            // Enemy moves can also walk into our coverage and become visible.
-            if (isEnemy) {
-              await revealEnemiesInCoverage()
-            }
+          // One animateMovePath call per move, regardless of side. For
+          // friendly moves we use the per-step callback to refresh
+          // coverage and reveal newly-sensed enemies between waypoints
+          // — keeps the "sneak peek" feel without inflating the move
+          // duration with N cleanup-fade envelopes.
+          await animateMovePath(
+            node.container, path, moveMsPerHex(u), false,
+            isEnemy ? undefined : fxLayer,
+            isEnemy ? undefined : SIDE_COLOR[u.side],
+            isEnemy
+              ? undefined
+              : async (i: number) => {
+                  livePos.set(ev.unit, { col: ev.path[i][0], row: ev.path[i][1] })
+                  rebuildCoverage()
+                  await revealEnemiesInCoverage()
+                },
+          )
+          livePos.set(ev.unit, { col: last[0], row: last[1] })
+          if (isEnemy) {
+            // Enemy might have walked INTO our coverage — re-check.
+            await revealEnemiesInCoverage()
           }
           break
         }
