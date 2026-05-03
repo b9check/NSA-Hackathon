@@ -1,7 +1,6 @@
 import * as React from 'react'
 import { useStore } from '../store'
-import type { BaseInstance, SensorRef, UnitInstance, WeaponRef } from '../types'
-import { ActionMenu } from './ActionMenu'
+import type { BaseInstance, Contact, Mission, SensorRef, UnitInstance, WeaponRef } from '../types'
 import { RegionPicker } from './RegionPicker'
 import { ViewModeToggle, RealGameToggle } from './ViewModeToggle'
 
@@ -15,27 +14,10 @@ const DOMAIN_LABEL: Record<string, string> = {
 export function TopBar() {
   const game = useStore((s) => s.game)
   if (!game) return null
-  const v = game.victory
-  const hpThresholdPct = Math.round((v?.hp_loss_threshold ?? 0.25) * 100)
-  const turnCap = v?.turn_cap ?? 30
   return (
     <div className="h-12 bg-panel border-b border-line flex items-center px-5 text-sm font-mono">
       <div className="text-amber font-semibold tracking-widest">{game.name.toUpperCase()}</div>
-      <div className="mx-5 w-px h-5 bg-line" />
-      <span className="text-[10px] tracking-[0.2em] text-mute mr-2">WIN&nbsp;IF</span>
-      <div className="flex items-center gap-1.5 mr-6">
-        <WinChip label={`HP ≤ ${hpThresholdPct}%`}  tip={`Break enemy total HP below ${hpThresholdPct}% of starting`} />
-        <WinChipSep />
-        <WinChip label="ANNIHILATION"               tip="Eliminate every enemy unit AND base" />
-        <WinChipSep />
-        <WinChip label={`T${turnCap} HP%`}          tip={`At turn ${turnCap}, side with higher HP%% wins (tie = draw)`} />
-      </div>
       <div className="ml-auto flex items-center gap-3 flex-shrink-0">
-        <FactionPill side="blue" />
-        <FactionPill side="red" />
-        <div className="w-px h-5 bg-line mx-1" />
-        <RealGameToggle />
-        <div className="w-px h-5 bg-line mx-1" />
         <ViewModeToggle />
         <div className="w-px h-5 bg-line mx-1" />
         <RegionPicker />
@@ -92,18 +74,28 @@ function FactionPill({ side }: { side: 'blue' | 'red' }) {
 export function RightRail() {
   const game = useStore((s) => s.game)
   const selectedUnitId = useStore((s) => s.selectedUnitId)
-  const selectUnit = useStore((s) => s.selectUnit)
+  const viewMode = useStore((s) => s.viewMode)
   if (!game) return null
   const selected = game.units.find((u) => u.id === selectedUnitId) ?? null
-  const blue = game.units.filter((u) => u.side === 'blue')
-  const red = game.units.filter((u) => u.side === 'red')
-  const blueBases = (game.bases ?? []).filter((b) => b.side === 'blue')
-  const redBases = (game.bases ?? []).filter((b) => b.side === 'red')
+
+  // If viewing as a side (blue/red), and the selected unit is the OTHER side's,
+  // show the fused intel picture (contact + probabilities) instead of ground truth.
+  let contactView: Contact | null = null
+  if (selected && viewMode !== 'omniscient' && selected.side !== viewMode) {
+    const myContacts = game.contacts?.[viewMode] ?? []
+    contactView = myContacts.find((c) => c.contact_id === selected.id) ?? null
+  }
 
   return (
     <div className="w-[360px] bg-panel border-l border-line flex flex-col h-full text-sm min-h-0">
-      <Section title="SELECTED UNIT" grow>
-        {selected ? <UnitDetail unit={selected} /> : <Empty />}
+      <Section title={contactView ? 'CONTACT' : 'SELECTED UNIT'} grow>
+        {contactView ? (
+          <ContactDetail contact={contactView} truthHidden />
+        ) : selected ? (
+          <UnitDetail unit={selected} />
+        ) : (
+          <Empty />
+        )}
       </Section>
     </div>
   )
@@ -247,6 +239,110 @@ function toCube(c: number, r: number) {
   return { x, y: -x - z, z }
 }
 
+// Lookup table for human-readable platform-key labels in the class-prob bars.
+const PLATFORM_LABEL: Record<string, string> = {
+  infantry: 'Infantry',
+  armor: 'Armor',
+  missile_launcher: 'SAM Launcher',
+  scout_drone: 'Scout Drone',
+  strike_drone: 'Strike Drone',
+  fighter: 'Fighter',
+  bomber: 'Bomber',
+  destroyer: 'Destroyer',
+}
+
+function ContactDetail({ contact, truthHidden }: { contact: Contact; truthHidden?: boolean }) {
+  // Sort class probabilities high-to-low; trim to top 5
+  const probs = Object.entries(contact.class_probs).sort((a, b) => b[1] - a[1])
+  const leadingClass = probs[0]?.[0] ?? '?'
+  const leadingProb = probs[0]?.[1] ?? 0
+  const leadingLabel = PLATFORM_LABEL[leadingClass] ?? leadingClass
+  // Effective ID confidence = existence × leading conditional. Bounded by existence.
+  const effective = contact.existence * leadingProb
+  const stale = !contact.currently_observed
+  return (
+    <div className="space-y-3 min-w-0">
+      <div className="min-w-0">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="text-[13px] font-semibold text-amber truncate">
+            {leadingLabel}
+          </span>
+          <span className="shrink-0 text-[10px] font-mono text-amber tabular-nums">
+            {(effective * 100).toFixed(0)}%
+          </span>
+          {stale && (
+            <span className="shrink-0 text-[9px] font-mono text-mute border border-mute/40 px-1 rounded-sm uppercase tracking-wider">
+              Stale
+            </span>
+          )}
+          {!stale && (
+            <span className="shrink-0 text-[9px] font-mono text-blue border border-blue/40 px-1 rounded-sm uppercase tracking-wider">
+              {contact.dominant_modality}
+            </span>
+          )}
+        </div>
+        <div className="text-[10px] font-mono text-mute mt-0.5 truncate">
+          {contact.contact_id} · believed ({contact.believed_col},{contact.believed_row})
+        </div>
+        {truthHidden && (
+          <div className="text-[10px] text-mute mt-0.5 italic leading-snug">
+            Fused from your sensors. Truth hidden.
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-y-2 gap-x-3 text-[11px] font-mono">
+        <Stat label="EXISTENCE" value={`${(contact.existence * 100).toFixed(0)}`} suffix="%" />
+        <Stat label="UNCERT." value={`±${contact.position_uncertainty_hexes.toFixed(1)}`} suffix="hex" />
+        <Stat label="REFINED" value={`t${contact.last_refined_turn}`} />
+        <Stat label="OBSERVERS" value={`${contact.contributing_sensor_ids.length}`} />
+      </div>
+
+      <div className="min-w-0">
+        <div className="text-[10px] tracking-widest text-mute mb-1.5 font-mono">
+          CLASS DISTRIBUTION
+        </div>
+        <div className="space-y-1.5">
+          {probs.slice(0, 5).map(([key, p]) => (
+            <ProbBar key={key} label={PLATFORM_LABEL[key] ?? key} value={p} />
+          ))}
+        </div>
+      </div>
+
+      {contact.contributing_sensor_ids.length > 0 && (
+        <div className="min-w-0">
+          <div className="text-[10px] tracking-widest text-mute mb-1.5 font-mono">
+            CONTRIBUTING SENSORS
+          </div>
+          <div className="text-[10px] font-mono text-blue space-y-0.5">
+            {contact.contributing_sensor_ids.map((sid) => (
+              <div key={sid} className="truncate">{sid}</div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProbBar({ label, value }: { label: string; value: number }) {
+  const pct = Math.max(0, Math.min(1, value)) * 100
+  return (
+    <div className="min-w-0">
+      <div className="flex justify-between text-[10px] font-mono">
+        <span className="text-fg truncate min-w-0">{label}</span>
+        <span className="shrink-0 text-mute tabular-nums">{pct.toFixed(0)}%</span>
+      </div>
+      <div className="h-1 bg-line/60 rounded-sm overflow-hidden mt-0.5">
+        <div
+          className="h-full bg-amber/70"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
 function UnitDetail({ unit }: { unit: UnitInstance }) {
   const viewMode = useStore((s) => s.viewMode)
   const accent = unit.side === 'blue' ? 'text-blue' : 'text-red'
@@ -277,7 +373,7 @@ function UnitDetail({ unit }: { unit: UnitInstance }) {
           {unit.id} · {DOMAIN_LABEL[unit.domain] ?? unit.domain.toUpperCase()} · ({unit.col},{unit.row})
         </div>
       </div>
-      {canCommand && <ActionMenu unit={unit} />}
+      {canCommand && <MissionPanel unit={unit} />}
       <div className="grid grid-cols-3 gap-y-2 gap-x-3 text-[11px] font-mono">
         <Stat label="HP"     value={`${unit.hp}/${unit.max_hp}`} />
         <Stat label="SPEED"  value={`${unit.speed}`}  suffix="hx/t" />
@@ -331,6 +427,89 @@ function weaponMeta(w: WeaponRef): string {
   if (w.self_destruct) parts.push('SD')
   return parts.join(' · ')
 }
+
+function MissionPanel({ unit }: { unit: UnitInstance }) {
+  const game = useStore((s) => s.game)
+  const setMission = useStore((s) => s.setMission)
+  const clearMission = useStore((s) => s.clearMission)
+  const startTargeting = useStore((s) => s.startTargeting)
+  const cancelTargeting = useStore((s) => s.cancelTargeting)
+  const targeting = useStore((s) => s.targeting)
+  const mission: Mission | undefined = game?.missions?.[unit.id]
+  const inTargetingForThis =
+    !!targeting && targeting.unitId === unit.id && targeting.kind === 'MISSION'
+
+  const onPickTarget = () => {
+    if (inTargetingForThis) cancelTargeting()
+    else startTargeting(unit.id, 'MISSION')
+  }
+  const onSetRoe = (r: Mission['roe']) => {
+    if (!mission) return
+    // Surveil/avoid recon plays out across many turns — bump cap so the
+    // run loop doesn't halt for max_turns when the player wanted "go and
+    // see what's there." Engage missions stay short; they expect frequent
+    // intervention.
+    const max_turns = r === 'surveil' || r === 'avoid' ? 30 : 8
+    void setMission({ ...mission, roe: r, max_turns })
+  }
+  const onClear = () => {
+    void clearMission(unit.id)
+  }
+
+  const targetLabel = mission
+    ? `(${mission.target_hex[0]}, ${mission.target_hex[1]})`
+    : 'no target'
+
+  return (
+    <div className="border border-line rounded-sm p-2 space-y-2">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[10px] font-mono uppercase tracking-wider text-blue">MISSION</span>
+        {mission && (
+          <span className="text-[9px] font-mono text-mute">{mission.roe}</span>
+        )}
+      </div>
+      <div className="flex items-center gap-2 text-[10px]">
+        <button
+          onClick={onPickTarget}
+          className={`px-2 py-1 border rounded-sm font-mono uppercase tracking-wider transition ${
+            inTargetingForThis
+              ? 'border-amber text-amber bg-amber/10'
+              : 'border-line text-mute hover:border-blue/60 hover:text-blue'
+          }`}
+        >
+          {inTargetingForThis ? 'click hex…' : (mission ? 'change target' : 'set target')}
+        </button>
+        <span className="text-mute font-mono">{targetLabel}</span>
+      </div>
+      {mission && (
+        <>
+          <div className="flex gap-1 text-[9px] font-mono">
+            {(['engage', 'surveil', 'avoid'] as const).map((opt) => (
+              <button
+                key={opt}
+                onClick={() => onSetRoe(opt)}
+                className={`flex-1 px-1.5 py-1 border rounded-sm uppercase tracking-wider transition ${
+                  mission.roe === opt
+                    ? 'border-amber text-amber bg-amber/10'
+                    : 'border-line text-mute hover:text-fg'
+                }`}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={onClear}
+            className="w-full text-[10px] px-2 py-1 border border-line rounded-sm font-mono uppercase tracking-wider text-mute hover:border-red/60 hover:text-red transition"
+          >
+            clear mission
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
 
 function SensorList({
   unitId, sensors, canCommand,

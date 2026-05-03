@@ -65,40 +65,48 @@ export function ActionMenu({ unit }: { unit: UnitInstance }) {
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-1.5">
-        <ActionBtn
-          label="MOVE"
-          hint={KEY_HINTS.MOVE}
-          enabled={moveable}
-          tip={moveable ? 'Pick destination on map' : 'Stationary platform'}
-          active={inTargetingForThis && targeting?.kind === 'MOVE'}
-          queued={pending?.kind === 'MOVE'}
-          onClick={() => click('MOVE')}
-        />
-        <ActionBtn
-          label="STRIKE"
-          hint={KEY_HINTS.STRIKE}
-          enabled={canStrike}
-          tip={canStrike ? 'Pick target hex' : 'No weapons'}
-          active={inTargetingForThis && targeting?.kind === 'STRIKE'}
-          queued={pending?.kind === 'STRIKE'}
-          onClick={() => click('STRIKE')}
-        />
-        <ActionBtn
-          label="SCOUT"
-          hint={KEY_HINTS.SCOUT}
-          enabled={canScout}
-          tip={canScout ? 'Stay put, reveal radius around drone' : 'Drone-only'}
-          queued={pending?.kind === 'SCOUT'}
-          onClick={() => click('SCOUT')}
-        />
-        <ActionBtn
-          label="OVERWATCH"
-          hint={KEY_HINTS.OVERWATCH}
-          enabled={canStrike}
-          tip={canStrike ? 'Auto-fire on movers in range' : 'No weapons'}
-          queued={pending?.kind === 'OVERWATCH'}
-          onClick={() => click('OVERWATCH')}
-        />
+        {moveable && (
+          <ActionBtn
+            label="MOVE"
+            hint={KEY_HINTS.MOVE}
+            enabled={true}
+            tip="Pick destination on map"
+            active={inTargetingForThis && targeting?.kind === 'MOVE'}
+            queued={pending?.kind === 'MOVE'}
+            onClick={() => click('MOVE')}
+          />
+        )}
+        {canStrike && (
+          <ActionBtn
+            label="STRIKE"
+            hint={KEY_HINTS.STRIKE}
+            enabled={true}
+            tip="Pick target hex"
+            active={inTargetingForThis && targeting?.kind === 'STRIKE'}
+            queued={pending?.kind === 'STRIKE'}
+            onClick={() => click('STRIKE')}
+          />
+        )}
+        {canScout && (
+          <ActionBtn
+            label="SCOUT"
+            hint={KEY_HINTS.SCOUT}
+            enabled={true}
+            tip="Stay put, reveal radius around drone"
+            queued={pending?.kind === 'SCOUT'}
+            onClick={() => click('SCOUT')}
+          />
+        )}
+        {canStrike && (
+          <ActionBtn
+            label="OVERWATCH"
+            hint={KEY_HINTS.OVERWATCH}
+            enabled={true}
+            tip="Auto-fire on movers in range"
+            queued={pending?.kind === 'OVERWATCH'}
+            onClick={() => click('OVERWATCH')}
+          />
+        )}
         <ActionBtn
           label="HOLD"
           hint={KEY_HINTS.HOLD}

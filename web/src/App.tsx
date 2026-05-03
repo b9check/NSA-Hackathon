@@ -4,7 +4,6 @@ import { MapStage } from './components/MapStage'
 import { TopBar, RightRail } from './components/HUD'
 import { TurnBar } from './components/TurnBar'
 import { EndGameOverlay } from './components/EndGameOverlay'
-import { BattleLog } from './components/BattleLog'
 
 
 /** Watch the engine-authoritative game.winner field and surface the
@@ -43,49 +42,12 @@ function useGlobalShortcuts() {
       }
       const st = useStore.getState()
 
-      // Cancel targeting / clear selection
+      // Cancel mission targeting / clear selection
       if (e.key === 'Escape') {
         if (st.targeting) st.cancelTargeting()
         else st.selectUnit(null)
         return
       }
-
-      // Smart Space: lock current side, or resolve if both locked
-      if (e.key === ' ' || e.key === 'Spacebar') {
-        e.preventDefault()
-        const ti = st.turnInfo
-        if (!ti) return
-        if (ti.blue_locked && ti.red_locked) {
-          st.resolveTurn()
-          return
-        }
-        const side: 'blue' | 'red' =
-          st.viewMode === 'red' ? 'red' :
-          ti.blue_locked ? 'red' : 'blue'
-        st.lockSide(side)
-        return
-      }
-
-      // Action shortcuts only fire when a controllable friendly unit is selected
-      const u = st.selectedUnit()
-      if (!u) return
-      const playerSide: 'blue' | 'red' = st.viewMode === 'red' ? 'red' : 'blue'
-      if (u.side !== playerSide) return
-
-      // Gate each shortcut on the unit's capability so e.g. pressing S
-      // on a weaponless scout drone doesn't enter STRIKE targeting (it
-      // would just silently fail later when no hex is valid).
-      const canMove   = u.speed > 0
-      const canStrike = u.weapon > 0
-      const canScout  = u.type === 'scout_drone'
-
-      const k = e.key.toLowerCase()
-      if (k === 'm' && canMove) st.startTargeting(u.id, 'MOVE')
-      else if (k === 's' && canStrike) st.startTargeting(u.id, 'STRIKE')
-      else if (k === 'v' && canScout) st.setOrder({ kind: 'SCOUT', unit_id: u.id })
-      else if (k === 'o' && canStrike) st.setOrder({ kind: 'OVERWATCH', unit_id: u.id })
-      else if (k === 'h') st.setOrder({ kind: 'HOLD', unit_id: u.id })
-      else if (k === 'x') st.clearOrder(u.id)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -131,8 +93,6 @@ export default function App() {
         {swapping && <SwapOverlay />}
         <EndGameOverlay />
       </div>
-      <BattleLog />
-      <BottomBar />
     </div>
   )
 }
@@ -172,27 +132,3 @@ function SwapOverlay() {
   )
 }
 
-function BottomBar() {
-  const game = useStore((s) => s.game)
-  const hover = useStore((s) => s.hoverHex)
-  const selected = useStore((s) => s.selectedUnit())
-  if (!game) return null
-  const cell = hover
-    ? game.map.cells.find((c) => c.col === hover.col && c.row === hover.row)
-    : null
-  return (
-    <div className="h-8 bg-panel border-t border-line flex items-center px-5 text-[11px] font-mono text-mute gap-6">
-      <span>SCENARIO {game.name}</span>
-      <span>SEED {game.seed}</span>
-      {hover && (
-        <span>
-          HEX ({hover.col},{hover.row}) — {cell ? cell.terrain : '—'}
-        </span>
-      )}
-      {selected && (
-        <span className="text-amber">SELECTED {selected.display}</span>
-      )}
-      <span className="ml-auto opacity-50">alex_game_engine · 0→1 build</span>
-    </div>
-  )
-}

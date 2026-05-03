@@ -19,11 +19,13 @@ const MOVE_MS_PER_HEX: Record<string, number> = {
 }
 
 
-export const STRIKE_TRACER_MS = 130    // missile flight to target
-export const STRIKE_IMPACT_MS = 180    // particles + popup tail
-export const DEATH_MS = 500            // total death sequence
-export const SCOUT_REVEAL_MS = 220     // reveal blip animation
-export const DAMAGE_FLASH_MS = 160
+// Combat feedback — generous linger so the player can register what happened.
+// Previously these were too short to read; bumped for demo clarity.
+export const STRIKE_TRACER_MS = 220    // missile flight to target
+export const STRIKE_IMPACT_MS = 350    // particles + popup tail
+export const DEATH_MS = 800            // total death sequence
+export const SCOUT_REVEAL_MS = 360     // reveal blip animation
+export const DAMAGE_FLASH_MS = 280
 
 
 /** Wallclock ms to traverse one hex. 0 = unit can't move (stationary). */

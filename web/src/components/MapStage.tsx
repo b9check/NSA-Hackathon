@@ -133,9 +133,10 @@ async function buildPixi(
   const overlayLayer = new Container() // reachability, ranges
   const orderLayer = new Container() // queued-order arrows / reticles
   const hoverLayer = new Container()
+  const contactsLayer = new Container() // fusion-layer halos (uncertainty + existence)
   const unitLayer = new Container()
   const fxLayer = new Container() // tracers, particles, popups
-  root.addChild(gridLayer, overlayLayer, orderLayer, hoverLayer, unitLayer, fxLayer)
+  root.addChild(gridLayer, overlayLayer, orderLayer, hoverLayer, contactsLayer, unitLayer, fxLayer)
 
   // Pre-compute hex centers
   const cellCenters = new Map<string, { x: number; y: number; cell: HexCell }>()
@@ -213,6 +214,8 @@ async function buildPixi(
   overlayLayer.addChild(overlay)
   const orderGfx = new Graphics()
   orderLayer.addChild(orderGfx)
+  const contactsGfx = new Graphics()
+  contactsLayer.addChild(contactsGfx)
   const selectionGfx = new Graphics()
   selectionGfx.filters = [
     new GlowFilter({ distance: 12, outerStrength: 2, innerStrength: 0.4, color: COLORS.amber }),
@@ -237,6 +240,7 @@ async function buildPixi(
     overlay.clear()
     orderGfx.clear()
     selectionGfx.clear()
+    contactsGfx.clear()
 
     const selected = selectedUnitId
       ? s.units.find((u) => u.id === selectedUnitId)
@@ -244,18 +248,8 @@ async function buildPixi(
 
     const visibleHexes = computeVisibleHexes(s, viewMode)
     const sideView = viewMode !== 'omniscient'
+    void sideView; void visibleHexes
 
-    // ---- Fog ----
-    if (sideView) {
-      for (const cell of s.map.cells) {
-        const key = `${cell.col},${cell.row}`
-        if (visibleHexes.has(key)) continue
-        const c = cellCenters.get(key)!
-        fogGfx
-          .poly(hexCorners(c.x, c.y, HEX_SIZE * 1.04))
-          .fill({ color: 0x05080F, alpha: 0.18 })
-      }
-    }
     // No fog overlay on the terrain — both sides see the satellite map
     // and base positions at all times. Visibility only gates which
     // ENEMY UNITS get rendered (handled by the syncUnits filter below
@@ -308,6 +302,8 @@ async function buildPixi(
       }
       // Draw ghosts for entries that aren't currently visible.
       drawLastKnownGhosts(overlay, s, viewMode, visibleHexes, myMap, cellCenters)
+      // Fusion-layer halos: existence + position uncertainty per contact.
+      drawContacts(contactsGfx, s, viewMode, cellCenters)
     }
 
     // ---- Reconcile units + bases (per-id Containers) ----
@@ -323,6 +319,42 @@ async function buildPixi(
       return visibleHexes.has(`${u.col},${u.row}`)
     }, unitNodes)
 
+    // ---- Enemy unit opacity by contact existence (side views only) ----
+    // The fusion layer already produces per-enemy `existence` values;
+    // expose that as the unit symbol's alpha so high-confidence contacts
+    // paint solid and fuzzy / SIGINT-only ones look ghostly.
+    if (sideView) {
+      const myContacts = s.contacts?.[viewMode] ?? []
+      const existById = new Map(myContacts.map((c) => [c.contact_id, c.existence]))
+      for (const u of s.units) {
+        if (u.side === viewMode) continue
+        const node = unitNodes.get(u.id)
+        if (!node) continue
+        const e = existById.get(u.id)
+        // No contact at all = render very faintly (visible enemy without a
+        // proper sensor lock — e.g. just-saw-them ghosts from Alex's lastSeen).
+        node.container.alpha = Math.max(0.25, Math.min(1, e ?? 0.35))
+      }
+      for (const b of s.bases ?? []) {
+        if (b.side === viewMode) continue
+        const node = baseNodes.get(b.id)
+        if (!node) continue
+        const e = existById.get(b.id)
+        node.container.alpha = Math.max(0.25, Math.min(1, e ?? 0.35))
+      }
+    } else {
+      // Omniscient: full opacity for everything.
+      for (const node of unitNodes.values()) node.container.alpha = 1
+      for (const node of baseNodes.values()) node.container.alpha = 1
+    }
+
+    // ---- Mission routes — long-lived dashed lines from each unit to its
+    // mission target (operational picture). Drawn underneath one-off
+    // queued-order arrows so a tactical override visually "wins" today.
+    drawMissionRoutes(orderGfx, s, viewMode, cellCenters)
+    // Radar-on emission glow + ammo dots, painted at each unit. Always-on
+    // state info — no clicking required to see who's emitting / out of ammo.
+    drawUnitStateBadges(orderGfx, s, viewMode, cellCenters)
     // ---- Queued orders (above overlays, below units) ----
     drawQueuedOrders(orderGfx, s, cellCenters, viewMode)
 
@@ -593,20 +625,14 @@ async function buildPixi(
 // ---------------- Drawing helpers ----------------
 
 function drawHexGrid(
-  layer: Container,
-  state: GameState,
-  centers: Map<string, { x: number; y: number; cell: HexCell }>,
+  _layer: Container,
+  _state: GameState,
+  _centers: Map<string, { x: number; y: number; cell: HexCell }>,
 ) {
-  // Subtle tactical overlay — every hex outlined at low alpha so commanders
-  // can read positions without occluding the satellite-style backdrop.
-  const outline = new Graphics()
-  layer.addChild(outline)
-  for (const cell of state.map.cells) {
-    const c = centers.get(`${cell.col},${cell.row}`)!
-    outline
-      .poly(hexCorners(c.x, c.y, HEX_SIZE * 0.985))
-      .stroke({ color: COLORS.fg, width: 0.6, alpha: 0.13 })
-  }
+  // Hex grid intentionally hidden. The lattice is purely an internal coordinate
+  // system; the player thinks in terms of map regions, not hex cells. Combat
+  // ranges + mission targets use circular overlays instead of hex polygons.
+  // Re-enable by drawing strokes here if a debug view is wanted.
 }
 
 
@@ -664,20 +690,48 @@ function drawReachability(
   }
 }
 
+/**
+ * Render the per-side fused intel picture as a small dominant-modality pip
+ * at each contact's believed hex. Uncertainty is conveyed primarily through
+ * the enemy unit's opacity (set in syncUnits via the contact lookup); this
+ * layer just tags the modality and existence with a colored dot.
+ *
+ * Pip color: radar=blue, sigint=violet, eo=green.
+ * Pip opacity scales with existence.
+ */
+function drawContacts(
+  g: Graphics,
+  state: GameState,
+  viewMode: ViewMode,
+  centers: Map<string, { x: number; y: number; cell: HexCell }>,
+) {
+  if (viewMode === 'omniscient') return
+  const contacts = state.contacts?.[viewMode] ?? []
+  for (const c of contacts) {
+    const center = centers.get(`${c.believed_col},${c.believed_row}`)
+    if (!center) continue
+    const pipColor =
+      c.dominant_modality === 'radar' ? COLORS.blue
+      : c.dominant_modality === 'sigint' ? 0xC676FF
+      : COLORS.green
+    g.circle(center.x + HEX_SIZE * 0.55, center.y - HEX_SIZE * 0.55, 3.5)
+      .fill({ color: pipColor, alpha: c.existence })
+      .stroke({ color: 0xFFFFFF, width: 1, alpha: 0.7 * c.existence })
+  }
+}
+
 function drawSensorRing(
   g: Graphics,
   unit: UnitInstance,
   centers: Map<string, { x: number; y: number; cell: HexCell }>,
 ) {
+  if (unit.sensor <= 0) return
   const c = centers.get(`${unit.col},${unit.row}`)
   if (!c) return
-  for (const [key, v] of centers) {
-    const [col, row] = key.split(',').map(Number)
-    if (hexDistance(unit.col, unit.row, col, row) === unit.sensor) {
-      g.poly(hexCorners(v.x, v.y, HEX_SIZE * 0.92))
-        .stroke({ color: COLORS.green, width: 1, alpha: 0.5 })
-    }
-  }
+  // Smooth circle in pixel space: ~hex-edge-length per hex of range.
+  const r = unit.sensor * HEX_SIZE * Math.sqrt(3) * 0.5
+  g.circle(c.x, c.y, r)
+    .stroke({ color: COLORS.green, width: 1, alpha: 0.5 })
 }
 
 function drawWeaponRing(
@@ -686,18 +740,118 @@ function drawWeaponRing(
   centers: Map<string, { x: number; y: number; cell: HexCell }>,
 ) {
   if (unit.weapon === 0) return
-  for (const [key, v] of centers) {
-    const [col, row] = key.split(',').map(Number)
-    if (hexDistance(unit.col, unit.row, col, row) === unit.weapon) {
-      g.poly(hexCorners(v.x, v.y, HEX_SIZE * 0.92))
-        .stroke({ color: COLORS.amber, width: 1, alpha: 0.45 })
+  const c = centers.get(`${unit.col},${unit.row}`)
+  if (!c) return
+  const r = unit.weapon * HEX_SIZE * Math.sqrt(3) * 0.5
+  g.circle(c.x, c.y, r)
+    .stroke({ color: COLORS.amber, width: 1, alpha: 0.45 })
+}
+
+function drawSelectionRing(g: Graphics, cx: number, cy: number) {
+  g.circle(cx, cy, HEX_SIZE * 0.9)
+    .stroke({ color: COLORS.amber, width: 2, alpha: 0.95 })
+}
+
+/**
+ * Always-visible per-unit state badges so the player can read the picture
+ * without clicking. Surfaces:
+ *   - Radar-on glow: a magenta ring under any unit with an ACTIVE emitting
+ *     sensor (radar). They're advertising their presence; SIGINT will catch
+ *     them. Friendly side: shown all the time. Enemy side: only shown if
+ *     the unit appears at all (Alex's lastSeen filter, etc).
+ *   - Ammo dots: small dots stacked above the HP bar, one per remaining
+ *     round on the unit's primary weapon. Hidden for unlimited or 0-weapon
+ *     units. Helps spot "destroyer is dry on missiles" without clicking.
+ */
+function drawUnitStateBadges(
+  g: Graphics,
+  state: GameState,
+  viewMode: ViewMode,
+  centers: Map<string, { x: number; y: number; cell: HexCell }>,
+) {
+  for (const u of state.units) {
+    const c = centers.get(`${u.col},${u.row}`)
+    if (!c) continue
+    if (viewMode !== 'omniscient' && u.side !== viewMode) {
+      // Skip enemy badges for now — keeping the picture simple. (Their
+      // emissions still drive your SIGINT contacts via the modality pip.)
+      continue
+    }
+    // Radar-on glow
+    const emittingActive = (u.sensors ?? []).some(
+      (s) => s.is_active && (s.modality === 'radar') && s.emits,
+    )
+    if (emittingActive) {
+      g.circle(c.x, c.y, HEX_SIZE * 0.78)
+        .stroke({ color: 0xFF66FF, width: 2, alpha: 0.5 })
+      g.circle(c.x, c.y, HEX_SIZE * 0.92)
+        .stroke({ color: 0xFF66FF, width: 1, alpha: 0.25 })
+    }
+    // Ammo dots — only for units with a finite-ammo primary weapon.
+    const w = (u.weapons ?? [])[0]
+    if (w && w.ammo > 0 && w.ammo <= 8) {
+      const dotR = 2
+      const gap = 2.5
+      const totalW = w.ammo * (dotR * 2) + (w.ammo - 1) * gap
+      const startX = c.x - totalW / 2 + dotR
+      // Sit dots just above the HP bar (HP bar offset is below center).
+      const y = c.y + HEX_SIZE * 0.50
+      for (let i = 0; i < w.ammo; i++) {
+        g.circle(startX + i * (dotR * 2 + gap), y, dotR)
+          .fill({ color: COLORS.amber, alpha: 0.85 })
+          .stroke({ color: 0x000000, width: 0.5, alpha: 0.5 })
+      }
     }
   }
 }
 
-function drawSelectionRing(g: Graphics, cx: number, cy: number) {
-  g.poly(hexCorners(cx, cy, HEX_SIZE * 1.0))
-    .stroke({ color: COLORS.amber, width: 2, alpha: 0.95 })
+
+/**
+ * Draw a route line from each unit to its mission target. Shown only for
+ * the player's own side in side-views (and for everything in omniscient).
+ * Color encodes ROE (engage=amber, surveil=cyan, avoid=red); line dashes
+ * along its length so the direction is readable.
+ */
+function drawMissionRoutes(
+  g: Graphics,
+  state: GameState,
+  viewMode: ViewMode,
+  centers: Map<string, { x: number; y: number; cell: HexCell }>,
+) {
+  const missions = state.missions ?? {}
+  for (const m of Object.values(missions)) {
+    const unit = state.units.find((u) => u.id === m.unit_id)
+    if (!unit) continue
+    if (viewMode !== 'omniscient' && unit.side !== viewMode) continue
+    const a = centers.get(`${unit.col},${unit.row}`)
+    const b = centers.get(`${m.target_hex[0]},${m.target_hex[1]}`)
+    if (!a || !b) continue
+    const color =
+      m.roe === 'engage' ? COLORS.amber
+      : m.roe === 'surveil' ? COLORS.blue
+      : COLORS.red
+    // Dashed line: walk in segments of ~7px on, 5px off
+    const dx = b.x - a.x, dy = b.y - a.y
+    const len = Math.hypot(dx, dy)
+    if (len < 1) continue
+    const ux = dx / len, uy = dy / len
+    const stepOn = 7, stepOff = 5
+    const startGap = HEX_SIZE * 0.6  // skip from the unit's own hex outward
+    const endGap = HEX_SIZE * 0.55   // stop short of the target hex's center
+    let t = startGap
+    while (t < len - endGap) {
+      const t2 = Math.min(t + stepOn, len - endGap)
+      g.moveTo(a.x + ux * t, a.y + uy * t)
+        .lineTo(a.x + ux * t2, a.y + uy * t2)
+        .stroke({ color, width: 1.5, alpha: 0.55 })
+      t = t2 + stepOff
+    }
+    // Small target reticle at destination
+    g.circle(b.x, b.y, HEX_SIZE * 0.35)
+      .stroke({ color, width: 1, alpha: 0.5 })
+    g.circle(b.x, b.y, 2.5)
+      .fill({ color, alpha: 0.7 })
+  }
 }
 
 
@@ -1016,6 +1170,19 @@ function commitTargetingClick(
       })
       return true
     }
+    case 'MISSION': {
+      // Operational target: any in-bounds hex is OK; the auto-resolve loop
+      // handles routing + ROE.
+      const cell = game.map.cells.find((c) => c.col === hex.col && c.row === hex.row)
+      if (!cell) return rejectClick('out of bounds', hex, game)
+      // Domain check: don't let ground unit aim a mission into water etc.
+      if (unit.domain === 'land' && cell.terrain === 'water')
+        return rejectClick('ground unit can\'t target water', hex, game)
+      if (unit.domain === 'sea' && cell.terrain !== 'water')
+        return rejectClick('ship can only target water', hex, game)
+      void useStore.getState().commitMissionTarget(unit.id, [hex.col, hex.row])
+      return true
+    }
   }
   return false
 }
@@ -1069,10 +1236,10 @@ export function MapStage() {
             }
             return
           }
-          // Default selection behavior.
-          const playerSide: 'blue' | 'red' =
-            st.viewMode === 'red' ? 'red' : 'blue'
-          if (unit && unit.side === playerSide) selectUnit(unit.id)
+          // Default selection behavior. Allow selecting any unit — the right
+          // panel decides whether to show ground truth (own / omniscient) or
+          // the fused contact picture (enemy under sensor coverage).
+          if (unit) selectUnit(unit.id)
           else selectUnit(null)
         },
         (hex) => setHover(hex),

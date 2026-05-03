@@ -73,11 +73,11 @@ PLATFORMS: dict[str, Platform] = {
     "scout_drone": Platform(
         key="scout_drone", display="Scout Drone",
         domain="air", glyph="U",
-        speed=5, hp=1, cost=20,
+        speed=6, hp=1, cost=20,
         scout_radius=4,
-        sensors=("passive_2",),
+        sensors=("passive_2", "sigint_5"),
         weapons=(),
-        role="Eyes of the team. SCOUT reveals radius 4 around its hex",
+        role="Eyes of the team. SCOUT reveals radius 4 around its hex; SIGINT detects emitters",
     ),
     "strike_drone": Platform(
         key="strike_drone", display="Strike Drone",
@@ -90,26 +90,26 @@ PLATFORMS: dict[str, Platform] = {
     "fighter": Platform(
         key="fighter", display="Fighter",
         domain="air", glyph="A",
-        speed=5, hp=3, cost=100, stealth=True,
-        sensors=("passive_1", "radar_3"),
+        speed=8, hp=3, cost=100, stealth=True,
+        sensors=("passive_1", "radar_3", "sigint_5"),
         weapons=("aam_asm",),
-        role="Fast multirole stealth; radar ON breaks stealth at long range",
+        role="Fast multirole stealth; radar ON breaks stealth; SIGINT detects emitters",
     ),
     "bomber": Platform(
         key="bomber", display="Bomber",
         domain="air", glyph="X",
-        speed=3, hp=4, cost=80,
+        speed=5, hp=4, cost=80,
         sensors=("passive_1",),
         weapons=("bomb",),
-        role="Slow heavy striker; tiny magazine; no air-to-air",
+        role="Heavy striker; tiny magazine; no air-to-air",
     ),
     "destroyer": Platform(
         key="destroyer", display="Destroyer",
         domain="sea", glyph="N",
         speed=3, hp=5, cost=120,
-        sensors=("passive_1", "radar_3"),
+        sensors=("passive_1", "radar_3", "sigint_7"),
         weapons=("ship_battery",),
-        role="Sea AAW + ASuW + land-attack; pays radar visibility tax",
+        role="Sea AAW + ASuW + land-attack; pays radar visibility tax; long-range ESM",
     ),
 }
 

@@ -377,6 +377,12 @@ def _phase_update(
     events.append(TurnEndEvent(turn=turn, blue_score=blue_s, red_score=red_s))
     state.turn = turn + 1
 
+    # Recompute per-side fused intel picture from current sensor coverage.
+    # Done after move/strike/death so contacts reflect end-of-turn truth
+    # under each side's sensor coverage. Ghosts of unobserved enemies decay.
+    from engine.sensing import update_contacts
+    update_contacts(state)
+
     winner, reason = compute_winner(state)
     if winner is not None:
         state.winner = winner

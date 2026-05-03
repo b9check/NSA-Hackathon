@@ -90,6 +90,32 @@ export interface VictoryConfig {
 
 export type WinReason = 'hp_collapse' | 'turn_cap' | 'annihilation'
 
+export interface Mission {
+  unit_id: string
+  target_hex: [number, number]
+  roe: 'engage' | 'surveil' | 'avoid'
+  radar_state: 'on' | 'off' | 'auto'
+  halt_on_contact: boolean
+  halt_on_low_hp: boolean
+  halt_on_no_ammo: boolean
+  max_turns: number
+  intent: string
+}
+
+export interface Contact {
+  contact_id: string
+  target_kind: 'unit' | 'base'
+  believed_col: number
+  believed_row: number
+  position_uncertainty_hexes: number
+  existence: number              // P(real), 0..1
+  class_probs: Record<string, number>   // platform-key -> P(class)
+  last_refined_turn: number
+  currently_observed: boolean
+  contributing_sensor_ids: string[]
+  dominant_modality: string
+}
+
 export interface GameState {
   name: string
   seed: number
@@ -103,6 +129,8 @@ export interface GameState {
   starting_hp?: Record<string, number>
   winner?: 'blue' | 'red' | 'draw' | null
   win_reason?: WinReason | null
+  contacts?: { blue: Contact[]; red: Contact[] }
+  missions?: Record<string, Mission>
 }
 
 

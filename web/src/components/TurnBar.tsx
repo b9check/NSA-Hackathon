@@ -1,174 +1,87 @@
-// The bar at the bottom of the map: match timer, turn counter, both
-// sides' live scores, lock-orders / resolve-turn controls. State
-// machine:
-//
-//   QUEUEING_BLUE  -> [LOCK BLUE]
-//   BLUE_LOCKED    -> [LOCK RED]     auto-switches viewmode to RED
-//   RED_LOCKED     -> [RESOLVE TURN] pulse animation
-//
-// RESOLVING -> spinner; cleared when /api/resolve returns + state refetches.
-import { useEffect, useRef, useState } from 'react'
+// Operational bottom bar: just the GO button.
+// The previous tactical lock/resolve dance (LOCK BLUE → LOCK RED → RESOLVE)
+// has been collapsed in favor of mission-driven simulation. The player
+// plans missions, hits GO, the engine runs both sides until any halt.
+import { useState } from 'react'
 import { useStore } from '../store'
-import { HpStatus } from './Timer'
 
-
-/** Smoothly interpolate to a numeric target. */
-function useTweenedNumber(target: number, ms = 600): number {
-  const [shown, setShown] = useState(target)
-  const fromRef = useRef(target)
-  useEffect(() => {
-    const from = fromRef.current
-    const to = target
-    if (from === to) return
-    const start = performance.now()
-    let raf = 0
-    const tick = () => {
-      const t = Math.min(1, (performance.now() - start) / ms)
-      const e = 1 - Math.pow(1 - t, 3) // easeOutCubic
-      setShown(from + (to - from) * e)
-      if (t < 1) raf = requestAnimationFrame(tick)
-      else {
-        fromRef.current = to
-        setShown(to)
-      }
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [target, ms])
-  return shown
-}
 
 export function TurnBar() {
-  // ALL hooks must run unconditionally on every render — keep them above
-  // any early-returns. (Rules of hooks.)
   const game = useStore((s) => s.game)
-  const turnInfo = useStore((s) => s.turnInfo)
-  const viewMode = useStore((s) => s.viewMode)
-  const setViewMode = useStore((s) => s.setViewMode)
-  const lockSide = useStore((s) => s.lockSide)
-  const resolveTurn = useStore((s) => s.resolveTurn)
-  const resolving = useStore((s) => s.resolving)
-  const pendingOrders = useStore((s) => s.pendingOrders)
-
-  if (!game || !turnInfo) {
-    return (
-      <div className="h-12 bg-panel border-t border-line flex items-center px-5 text-[11px] font-mono text-mute">
-        loading turn state…
-      </div>
-    )
-  }
-
-  const blueUnits = game.units.filter((u) => u.side === 'blue')
-  const redUnits = game.units.filter((u) => u.side === 'red')
-  // Local pending counts (haven't necessarily POSTed yet)
-  const localBlue = blueUnits.filter((u) => pendingOrders[u.id]).length
-  const localRed = redUnits.filter((u) => pendingOrders[u.id]).length
-
-  const blueLocked = turnInfo.blue_locked
-  const redLocked = turnInfo.red_locked
-  const canResolve = blueLocked && redLocked && !resolving
-
-  const lockBlue = async () => {
-    await lockSide('blue')
-    if (viewMode !== 'red') setViewMode('red')
-  }
-  const lockRed = async () => {
-    await lockSide('red')
-  }
+  if (!game) return null
 
   return (
-    <div className="h-12 bg-panel border-t border-line flex items-center px-4 gap-3 font-mono text-[11px]">
-      {/* HP bars (blue + red) — replaces the wallclock. */}
-      <HpStatus />
-
-      <div className="w-px h-5 bg-line" />
-
-      {/* Turn counter */}
-      <div className="flex items-baseline gap-2">
-        <span className="text-mute tracking-widest">TURN</span>
-        <span className="text-fg text-base font-semibold">{turnInfo.turn + 1}</span>
-        <span className="text-mute">/ {game.turn_limit}</span>
-      </div>
-
-      <div className="w-px h-5 bg-line" />
-
-      {/* Blue */}
-      <SideControl
-        side="blue"
-        score={turnInfo.blue_score}
-        ordered={localBlue}
-        total={blueUnits.length}
-        locked={blueLocked}
-        onLock={lockBlue}
-        disabled={resolving}
-      />
-
-      {/* Red */}
-      <SideControl
-        side="red"
-        score={turnInfo.red_score}
-        ordered={localRed}
-        total={redUnits.length}
-        locked={redLocked}
-        onLock={lockRed}
-        disabled={resolving}
-      />
-
-      <div className="flex-1" />
-
-      {/* Resolve */}
-      <button
-        onClick={() => canResolve && resolveTurn()}
-        disabled={!canResolve}
-        className={[
-          'h-8 px-4 rounded-sm border tracking-widest text-[11px]',
-          'transition-colors',
-          canResolve
-            ? 'bg-amber/10 border-amber text-amber animate-pulse hover:bg-amber/20'
-            : 'border-line text-mute opacity-50 cursor-not-allowed',
-        ].join(' ')}
-      >
-        {resolving ? 'RESOLVING…' : 'RESOLVE TURN'}
-      </button>
+    <div className="h-12 bg-panel border-t border-line flex items-center justify-end px-4 gap-3 font-mono text-[11px]">
+      <GoButton />
     </div>
   )
 }
 
 
-function SideControl({
-  side, score, ordered, total, locked, onLock, disabled,
-}: {
-  side: 'blue' | 'red'
-  score: number
-  ordered: number
-  total: number
-  locked: boolean
-  onLock: () => void
-  disabled: boolean
-}) {
-  const c = side === 'blue' ? 'text-blue' : 'text-red'
-  const dim = side === 'blue' ? 'border-blue/40' : 'border-red/40'
-  const dot = side === 'blue' ? 'bg-blue' : 'bg-red'
-  const shownScore = useTweenedNumber(score)
+function GoButton() {
+  const game = useStore((s) => s.game)
+  const runUntilHalt = useStore((s) => s.runUntilHalt)
+  // Block re-clicks while:
+  //   - posting /api/run (local `posting`)
+  //   - replaying the returned events in MapStage (store.replaying)
+  //   - or there are pending events queued for replay (store.pendingEvents)
+  // Without these gates, clicking GO mid-animation overwrites pendingEvents
+  // and corrupts the in-flight replay → random game-over triggers.
+  const replaying = useStore((s) => s.replaying)
+  const pendingEvents = useStore((s) => s.pendingEvents)
+  const gameOver = useStore((s) => s.gameOver)
+  const [posting, setPosting] = useState(false)
+  const [lastHalt, setLastHalt] = useState<string | null>(null)
+  const missionsCount = game?.missions ? Object.keys(game.missions).length : 0
+  const busy = posting || replaying || pendingEvents != null
+  const enabled = missionsCount > 0 && !busy && !gameOver
+
+  const onClick = async () => {
+    if (!enabled) return
+    setPosting(true)
+    setLastHalt(null)
+    try {
+      const r = await runUntilHalt(8)
+      if (r.halts.length === 0) {
+        setLastHalt(`ran ${r.turnsRun} turn(s) — no halt`)
+      } else {
+        const summary = r.halts
+          .slice(0, 3)
+          .map((h) => `${h.unit_id} (${h.reason})`)
+          .join(', ')
+        setLastHalt(`halt: ${summary}${r.halts.length > 3 ? ' …' : ''}`)
+      }
+    } catch (e: any) {
+      setLastHalt(`error: ${e?.message ?? e}`)
+    } finally {
+      setPosting(false)
+    }
+  }
+
   return (
-    <div className="flex items-center gap-2">
-      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
-      <span className={`${c} font-semibold tracking-widest`}>{side.toUpperCase()}</span>
-      <span className="text-fg tabular-nums w-10 text-right">{shownScore.toFixed(1)}</span>
-      <span className="text-mute text-[10px]">{ordered}/{total}</span>
+    <div className="flex items-center gap-3">
+      {lastHalt && (
+        <span className="text-[10px] font-mono text-mute max-w-[320px] truncate" title={lastHalt}>
+          {lastHalt}
+        </span>
+      )}
       <button
-        onClick={onLock}
-        disabled={disabled}
+        onClick={onClick}
+        disabled={!enabled}
+        title={
+          missionsCount === 0
+            ? 'Set at least one mission to enable auto-resolve'
+            : `Auto-resolve until any halt fires (up to 8 turns; ${missionsCount} mission${missionsCount === 1 ? '' : 's'} active)`
+        }
         className={[
-          'h-7 px-2 rounded-sm border text-[10px] tracking-widest',
-          locked
-            ? `${c} ${dim} bg-panel2 cursor-default`
-            : disabled
-            ? 'border-line text-mute opacity-50 cursor-not-allowed'
-            : `${c} ${dim} hover:bg-panel2`,
+          'h-8 px-5 rounded-sm border tracking-widest text-[11px]',
+          'transition-colors',
+          enabled
+            ? 'bg-blue/10 border-blue text-blue hover:bg-blue/20'
+            : 'border-line text-mute opacity-50 cursor-not-allowed',
         ].join(' ')}
       >
-        {locked ? 'LOCKED' : 'LOCK'}
+        {posting ? 'STARTING…' : (busy ? 'RUNNING…' : `GO (${missionsCount})`)}
       </button>
     </div>
   )

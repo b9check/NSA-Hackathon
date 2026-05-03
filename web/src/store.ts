@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type {
   GameState,
+  Mission,
   Order,
   OrderKind,
   TurnInfo,
@@ -20,7 +21,7 @@ export interface RegionMeta {
  *  for that unit; the next valid map click commits the order. */
 export interface TargetingMode {
   unitId: string
-  kind: 'MOVE' | 'STRIKE' | 'SCOUT' | 'CAPTURE'
+  kind: 'MOVE' | 'STRIKE' | 'SCOUT' | 'CAPTURE' | 'MISSION'
 }
 
 
@@ -79,6 +80,15 @@ interface AppState {
   reroll: () => Promise<void>
   refetchState: () => Promise<void>
   toggleSensor: (unitId: string, sensorKey: string, active: boolean) => Promise<void>
+
+  // Mission flow
+  setMission: (m: Mission) => Promise<void>
+  clearMission: (unitId: string) => Promise<void>
+  /** Commit a mission target picked from the map. If a mission already
+   *  exists for the unit, only the target_hex is updated (preserves ROE
+   *  and halt flags). Otherwise creates a new mission with sensible defaults. */
+  commitMissionTarget: (unitId: string, hex: [number, number]) => Promise<void>
+  runUntilHalt: (maxTurns?: number) => Promise<{ halts: Array<{unit_id: string; reason: string}>; turnsRun: number }>
 
   // ---- Turn flow -------------------------------------------------
   /** Pull the latest turn meta (scores, locks, counts) from /api/turn. */
@@ -249,6 +259,73 @@ export const useStore = create<AppState>((set, get) => ({
     // Bump asset version so the next refetch dodges the static file cache.
     set({ assetVersion: get().assetVersion + 1 })
     await get().refetchState()
+  },
+
+  setMission: async (m) => {
+    await fetchJson('/api/mission', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(m),
+    })
+    set({ assetVersion: get().assetVersion + 1 })
+    await get().refetchState()
+  },
+
+  commitMissionTarget: async (unitId, hex) => {
+    const existing = get().game?.missions?.[unitId]
+    const m: Mission = existing
+      ? { ...existing, target_hex: hex }
+      : {
+          unit_id: unitId,
+          target_hex: hex,
+          roe: 'engage',
+          radar_state: 'auto',
+          halt_on_contact: true,
+          halt_on_low_hp: true,
+          halt_on_no_ammo: true,
+          // Engage missions interrupt frequently; surveil/avoid recon-style
+          // missions are meant to play out — give them a long horizon.
+          max_turns: 8,
+          intent: '',
+        }
+    await get().setMission(m)
+    set({ targeting: null })
+  },
+
+  clearMission: async (unitId) => {
+    await fetchJson(`/api/mission/${encodeURIComponent(unitId)}`, { method: 'DELETE' })
+    set({ assetVersion: get().assetVersion + 1 })
+    await get().refetchState()
+  },
+
+  runUntilHalt: async (maxTurns = 8) => {
+    // Snapshot start-turn for event annotation (so the battle log gets
+    // turn-stamped entries even though we played multiple turns at once).
+    const startTurn = get().game?.turn ?? 0
+    const r: any = await fetchJson('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ max_turns: maxTurns }),
+    })
+    const events = (r?.events ?? []) as any[]
+    // Pipe events through the existing replay pipeline. MapStage subscribes
+    // to `pendingEvents` and animates each one against the CURRENT game
+    // state (which is still the pre-run snapshot — we deliberately don't
+    // refetch yet). When the animator finishes, onReplayComplete fires and
+    // pulls the post-run state.json (which has the new positions, HP,
+    // contacts, etc).
+    const seqBase = get().eventLog.length
+    const annotated: AnnotatedEvent[] = events.map(
+      (e: any, i: number) => ({ ...e, _turn: startTurn, _seq: seqBase + i }),
+    )
+    set({
+      pendingEvents: events,
+      pendingOrders: {},
+      targeting: null,
+      eventLog: [...get().eventLog, ...annotated].slice(-200),
+      selectedUnitId: null,
+    })
+    return { halts: r.halts ?? [], turnsRun: r.turns_run ?? 0 }
   },
 
   refetchTurn: async () => {

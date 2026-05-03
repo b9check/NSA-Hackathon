@@ -52,6 +52,15 @@ SENSORS: dict[str, Sensor] = {
         key="radar_4", display="Long-Range Radar", modality="radar", range=5, emits=True,
         notes="Toggle: ON to see at range, exposes the unit at long range.",
     ),
+    # ---- SIGINT (passive, detects emissions only) ----
+    "sigint_5": Sensor(
+        key="sigint_5", display="SIGINT", modality="sigint", range=5,
+        notes="Passive emission receiver; detects enemy radars regardless of LOS, but only when they're transmitting.",
+    ),
+    "sigint_7": Sensor(
+        key="sigint_7", display="Long-Range SIGINT", modality="sigint", range=7,
+        notes="Long-range emission receiver — naval ESM suite.",
+    ),
 }
 
 

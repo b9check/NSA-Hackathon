@@ -96,6 +96,56 @@ class BaseInstance(BaseModel):
     weapons: list[WeaponRef] = Field(default_factory=list)
 
 
+class Mission(BaseModel):
+    """Operational-level standing order for a single unit.
+
+    Replaces per-turn MOVE/STRIKE micromanagement. The mission persists across
+    turns; each turn, engine.missions.generate_orders_from_missions emits a
+    concrete Order based on current state + ROE. Player intervenes when a halt
+    condition fires (e.g. enemy contact made, HP low, target reached).
+    """
+    unit_id: str
+    target_hex: tuple[int, int]                       # final destination
+    roe: Literal["engage", "surveil", "avoid"] = "engage"
+    radar_state: Literal["on", "off", "auto"] = "auto"
+    # Halt-on-X flags. All default to on so the player gets a chance to react.
+    halt_on_contact: bool = True
+    halt_on_low_hp: bool = True
+    halt_on_no_ammo: bool = True
+    # Hard cap for runaway protection — stops the auto-loop after this many
+    # consecutive turns even if no other halt fires.
+    max_turns: int = 8
+    # Free-text reasoning (UI tooltip / replay narrative)
+    intent: str = ""
+
+
+class Contact(BaseModel):
+    """One side's belief about a single enemy entity (unit or base).
+
+    Decoupled from `UnitInstance` so the frontend can show the *intel
+    picture* (with uncertainty + class probabilities) without leaking
+    ground truth that the side hasn't observed.
+
+    `currently_observed` False means this is a stale ghost — the entity
+    was previously sensed but is not in any active sensor's coverage now.
+    Position uncertainty grows for ghosts, more so for likely-mobile
+    classes (aircraft expand fast, fixed sites barely move).
+    """
+    contact_id: str           # mirrors target unit/base id (so click-pick is trivial)
+    target_kind: Literal["unit", "base"] = "unit"
+    believed_col: int
+    believed_row: int
+    position_uncertainty_hexes: float       # 0 = exact hex; >0 = could be in a radius
+    existence: float                        # P(real) — 0..1
+    class_probs: dict[str, float] = Field(default_factory=dict)  # platform-key -> P(class)
+    last_refined_turn: int                  # turn the contact was last freshly observed
+    currently_observed: bool = True
+    contributing_sensor_ids: list[str] = Field(default_factory=list)
+    # The sensor modality(ies) currently or most-recently providing the strongest cue.
+    # Used by the UI to label the contact ("RADAR FIX", "VISUAL", "SIGINT FIX").
+    dominant_modality: str = ""
+
+
 class VictoryConfig(BaseModel):
     # Side loses if its current HP total drops to <= this fraction of its
     # starting HP total.
@@ -131,6 +181,13 @@ class GameState(BaseModel):
     # in progress.
     winner: Optional[str] = None       # "blue" | "red" | "draw" | None
     win_reason: Optional[str] = None   # "hp_collapse" | "turn_cap" | "annihilation"
+    # Per-side fused intelligence picture. Each side's list contains one Contact
+    # per enemy entity that side has observed (now or recently). Recomputed by
+    # engine.sensing after every resolve_turn.
+    contacts: dict[str, list[Contact]] = Field(default_factory=lambda: {"blue": [], "red": []})
+    # Standing missions, keyed by unit_id. Persist across turns until cleared
+    # or replaced. Generated per-turn into concrete Orders by engine.missions.
+    missions: dict[str, Mission] = Field(default_factory=dict)
 
     def unit_by_id(self, uid: str) -> Optional[UnitInstance]:
         return next((u for u in self.units if u.id == uid), None)

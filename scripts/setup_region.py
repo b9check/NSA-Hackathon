@@ -43,6 +43,21 @@ REGIONS: dict[str, dict] = {
                       name="Cook Strait"),
     "galicia":   dict(lat=42.60, lng=-8.90,   zoom=10,
                       name="Galician Approach"),
+    # ---- Continental presets — majority land with minor water/river features ----
+    "korea_dmz": dict(lat=38.20, lng=127.30,  zoom=11,
+                      name="Korean DMZ"),
+    "donbas":    dict(lat=48.30, lng=37.80,   zoom=10,
+                      name="Donbas Frontier"),
+    "caucasus":  dict(lat=42.50, lng=43.50,   zoom=10,
+                      name="Caucasus Border"),
+    "kashmir":   dict(lat=34.20, lng=74.40,   zoom=11,
+                      name="Kashmir Heights"),
+    # ---- Hybrid: majority land both sides, navigable water in the middle ----
+    # Strait of Hormuz: Iran coast (N) + Musandam Peninsula / UAE (S) +
+    # the strait itself (water across the middle). Plenty of land for ground
+    # ops and a long enough water channel for a carrier strike group.
+    "hormuz":    dict(lat=26.60, lng=56.40,   zoom=9,
+                      name="Strait of Hormuz"),
 }
 
 

@@ -22,8 +22,13 @@ from engine.terrain import TERRAIN_FROM_CHAR
 
 
 def _active_sensor_max(refs: list[SensorRef]) -> int:
-    """Effective max sensor range across only currently-active sensors."""
-    return max((s.range for s in refs if s.is_active), default=0)
+    """Effective max area-coverage range. SIGINT is excluded — it only
+    detects emitters, never lights up area, so the visibility ring doesn't
+    extend to SIGINT range."""
+    return max(
+        (s.range for s in refs if s.is_active and s.modality != "sigint"),
+        default=0,
+    )
 
 
 def _sensor_refs(keys: tuple[str, ...]) -> list[SensorRef]:
@@ -165,7 +170,7 @@ def load_scenario(path: str | Path) -> GameState:
         starting_total[b.side] += 50.0  # bases worth 50 each (matches resolver)
         starting_hp[b.side] += b.max_hp
 
-    return GameState(
+    state = GameState(
         name=raw["name"],
         seed=int(raw.get("seed", 42)),
         turn=0,
@@ -177,3 +182,7 @@ def load_scenario(path: str | Path) -> GameState:
         starting_total=starting_total,
         starting_hp=starting_hp,
     )
+    # Seed the initial intel picture from each side's starting sensor coverage.
+    from engine.sensing import update_contacts
+    update_contacts(state)
+    return state

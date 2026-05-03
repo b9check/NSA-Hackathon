@@ -456,16 +456,19 @@ async def resolve_endpoint() -> ResolveResult:
                 f"red_locked={_session['red_locked']}",
             )
         state = _ensure_state()
-        # Auto-fill HOLD for any unordered own units (low friction default).
-        def _fill_holds(side: str) -> list[Order]:
+        # Auto-fill defensive default for any unordered own units. Units with
+        # weapons + ammo + a credible contact in range go to OVERWATCH;
+        # otherwise HOLD. (Self-defense doesn't require a mission.)
+        from engine.missions import default_unmissioned_order
+        def _fill_defaults(side: str) -> list[Order]:
             existing = list(_session[f"{side}_orders"])
             ordered_ids = {o.unit_id for o in existing}
             for u in state.units:
                 if u.side == side and u.id not in ordered_ids:
-                    existing.append(HoldOrder(unit_id=u.id))
+                    existing.append(default_unmissioned_order(u, state))
             return existing
-        blue_orders = _fill_holds("blue")
-        red_orders = _fill_holds("red")
+        blue_orders = _fill_defaults("blue")
+        red_orders = _fill_defaults("red")
         turn_started = state.turn
         events: list[Event] = resolve_turn(state, blue_orders, red_orders)
         _session["last_events"] = events
@@ -479,6 +482,122 @@ async def resolve_endpoint() -> ResolveResult:
             events=[e.model_dump() for e in events],
             blue_score=blue_score, red_score=red_score,
         )
+
+
+class MissionBody(BaseModel):
+    unit_id: str
+    target_hex: tuple[int, int]
+    roe: str = "engage"
+    radar_state: str = "auto"
+    halt_on_contact: bool = True
+    halt_on_low_hp: bool = True
+    halt_on_no_ammo: bool = True
+    max_turns: int = 8
+    intent: str = ""
+
+
+@app.post("/api/mission")
+async def set_mission(body: MissionBody) -> dict:
+    """Create or replace a unit's standing mission."""
+    from engine.state import Mission
+    state = _ensure_state()
+    if not any(u.id == body.unit_id for u in state.units):
+        raise HTTPException(404, f"unit {body.unit_id} not found")
+    if body.roe not in ("engage", "surveil", "avoid"):
+        raise HTTPException(400, "roe must be engage|surveil|avoid")
+    state.missions[body.unit_id] = Mission(
+        unit_id=body.unit_id,
+        target_hex=tuple(body.target_hex),
+        roe=body.roe,
+        radar_state=body.radar_state,
+        halt_on_contact=body.halt_on_contact,
+        halt_on_low_hp=body.halt_on_low_hp,
+        halt_on_no_ammo=body.halt_on_no_ammo,
+        max_turns=body.max_turns,
+        intent=body.intent,
+    )
+    _persist_state()
+    return {"ok": True, "unit_id": body.unit_id}
+
+
+@app.delete("/api/mission/{unit_id}")
+async def clear_mission(unit_id: str) -> dict:
+    """Drop a unit's standing mission."""
+    state = _ensure_state()
+    state.missions.pop(unit_id, None)
+    _persist_state()
+    return {"ok": True, "unit_id": unit_id}
+
+
+class RunBody(BaseModel):
+    max_turns: int = 8
+
+
+@app.post("/api/run")
+async def run_until_halt(body: RunBody) -> dict:
+    """Auto-resolve up to `max_turns` turns from current missions. Stops at
+    the first turn any unit hits a halt condition (or game ends).
+
+    Returns the concatenated event log + the halt reasons that fired.
+    """
+    from engine.missions import (
+        evaluate_halts, generate_orders_from_missions, snapshot_contact_ids,
+        default_unmissioned_order,
+    )
+    async with _session_lock:
+        state = _ensure_state()
+        if not state.missions:
+            raise HTTPException(400, "no missions set")
+
+        snapshot_contacts = snapshot_contact_ids(state)
+        started_at_target = {
+            m.unit_id for m in state.missions.values()
+            if any(u.id == m.unit_id and (u.col, u.row) == tuple(m.target_hex)
+                   for u in state.units)
+        }
+
+        all_events: list = []
+        halts: list[dict] = []
+        turn_started = state.turn
+
+        max_iters = max(1, min(body.max_turns, 12))
+        for i in range(max_iters):
+            # Generate orders from missions; auto-fill HOLD for units without one.
+            blue_orders = generate_orders_from_missions(state, "blue")
+            red_orders = generate_orders_from_missions(state, "red")
+            ordered_blue = {o.unit_id for o in blue_orders}
+            ordered_red = {o.unit_id for o in red_orders}
+            for u in state.units:
+                if u.side == "blue" and u.id not in ordered_blue:
+                    blue_orders.append(default_unmissioned_order(u, state))
+                if u.side == "red" and u.id not in ordered_red:
+                    red_orders.append(default_unmissioned_order(u, state))
+
+            events = resolve_turn(state, blue_orders, red_orders)
+            all_events.extend([e.model_dump() for e in events])
+
+            if state.winner:
+                halts.append({"unit_id": "*", "reason": "game_over"})
+                break
+
+            fired = evaluate_halts(state, snapshot_contacts, started_at_target, i + 1)
+            if fired:
+                halts.extend({"unit_id": uid, "reason": r} for uid, r in fired)
+                break
+
+        _reset_orders()
+        _persist_state()
+        blue_score, red_score = compute_scores(state)
+        return {
+            "ok": True,
+            "turn_started_at": turn_started,
+            "turn_ended_at": state.turn,
+            "turns_run": state.turn - turn_started,
+            "events": all_events,
+            "halts": halts,
+            "blue_score": blue_score,
+            "red_score": red_score,
+        }
 
 
 @app.post("/api/turn/reset")
@@ -515,7 +634,14 @@ async def toggle_sensor(body: SensorToggleBody) -> dict:
         touched += 1
     if touched == 0:
         raise HTTPException(400, "no togglable radar sensor matched")
-    # Recompute summary range from active sensors only
-    unit.sensor = max((s.range for s in unit.sensors if s.is_active), default=0)
+    # Recompute summary range from active sensors only — own sensor coverage
+    # ring updates immediately so the player can plan. The fused intel picture
+    # (contacts) is intentionally NOT refreshed here: that only happens on
+    # turn resolution, so radar can't be flipped on/off as a free reconnaissance.
+    # Coverage ring excludes SIGINT — SIGINT only catches emitters, doesn't light up area.
+    unit.sensor = max(
+        (s.range for s in unit.sensors if s.is_active and s.modality != "sigint"),
+        default=0,
+    )
     _persist_state()
     return {"ok": True, "unit_id": unit.id, "sensor_summary_range": unit.sensor}
