@@ -362,8 +362,15 @@ def _phase_update(
     for u in state.units:
         if u.hp <= 0:
             events.append(DestroyedEvent(entity_id=u.id, side=u.side, is_base=False))
-        else:
-            survivors.append(u)
+            continue
+        # Spent munitions: a unit whose every weapon is out of ammo can
+        # no longer contribute. Bombers/fighters/SAMs/etc. exit the
+        # board the turn they fire their last shot. Scout drones (no
+        # weapons) are unaffected — their job is sensing.
+        if u.weapons and all(w.ammo == 0 for w in u.weapons):
+            events.append(DestroyedEvent(entity_id=u.id, side=u.side, is_base=False))
+            continue
+        survivors.append(u)
     state.units = survivors
     surviving_bases: list[BaseInstance] = []
     for b in state.bases:
