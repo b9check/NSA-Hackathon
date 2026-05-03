@@ -600,15 +600,14 @@ function drawHexGrid(
 }
 
 
-function drawReachability(
-  g: Graphics,
-  state: GameState,
-  unit: UnitInstance,
-  centers: Map<string, { x: number; y: number; cell: HexCell }>,
-) {
-  // Quick BFS approximation: hexes within `speed` step distance whose terrain is traversable.
-  // Mirrors engine/movement.py: mountain is passable for ground but eats
-  // the full move budget (one mountain step ends the turn).
+/** Returns a Map<"col,row", cost> of every hex reachable from `unit`'s
+ *  current position within unit.speed. Mirrors engine/movement.py
+ *  costs (mountain eats whole budget for ground; water blocks ground;
+ *  enemy-occupied hexes block any side). Used both for the visual
+ *  overlay and the click validator so the two never disagree. */
+export function reachableCostMap(
+  state: GameState, unit: UnitInstance,
+): Map<string, number> {
   const cost = (dom: string, t: string) => {
     if (dom === 'air') return 1
     if (dom === 'sea') return t === 'water' ? 1 : Infinity
@@ -618,12 +617,20 @@ function drawReachability(
     }
     // land
     if (t === 'water') return Infinity
-    if (t === 'mountain') return Math.max(1, unit.speed) // one step then stop
+    if (t === 'mountain') return Math.max(1, unit.speed)  // one step then stop
     if (t === 'urban' || t === 'forest') return 2
     return 1
   }
   const terrainAt = new Map<string, string>()
   for (const cell of state.map.cells) terrainAt.set(`${cell.col},${cell.row}`, cell.terrain)
+  // Block enemy-occupied hexes (matches engine's path_to).
+  const blocked = new Set<string>()
+  for (const u of state.units) {
+    if (u.side !== unit.side) blocked.add(`${u.col},${u.row}`)
+  }
+  for (const b of state.bases ?? []) {
+    if (b.side !== unit.side) blocked.add(`${b.col},${b.row}`)
+  }
   const best = new Map<string, number>()
   best.set(`${unit.col},${unit.row}`, 0)
   const stack: Array<[number, number, number]> = [[unit.col, unit.row, 0]]
@@ -631,6 +638,7 @@ function drawReachability(
     const [c, r, used] = stack.shift()!
     for (const [nc, nr] of neighbors(c, r)) {
       const key = `${nc},${nr}`
+      if (blocked.has(key)) continue
       const t = terrainAt.get(key)
       if (!t) continue
       const step = cost(unit.domain, t)
@@ -643,6 +651,17 @@ function drawReachability(
       }
     }
   }
+  return best
+}
+
+
+function drawReachability(
+  g: Graphics,
+  state: GameState,
+  unit: UnitInstance,
+  centers: Map<string, { x: number; y: number; cell: HexCell }>,
+) {
+  const best = reachableCostMap(state, unit)
   for (const [key, used] of best) {
     if (used === 0) continue
     const [col, row] = key.split(',').map(Number)
@@ -938,40 +957,31 @@ function commitTargetingClick(
     case 'MOVE': {
       if (unit.speed <= 0) return rejectClick('stationary platform', hex, game)
       if (hex.col === unit.col && hex.row === unit.row) return false
-      const dist = hexDistance(unit.col, unit.row, hex.col, hex.row)
-      if (dist > unit.speed) {
-        console.warn(
-          '[move-reject] out of move range',
-          { id: unit.id, side: unit.side, type: unit.type,
-            unitPos: [unit.col, unit.row], target: [hex.col, hex.row],
-            dist, speed: unit.speed },
-        )
+      // Use the SAME cost-aware BFS the overlay uses, so the two
+      // never disagree. Otherwise raw hex-distance lets the user
+      // click a 2-hex-away forest tile (cost 4 for infantry speed 2)
+      // and the engine then silently drops the move.
+      const reach = reachableCostMap(game, unit)
+      const key = `${hex.col},${hex.row}`
+      if (!reach.has(key)) {
+        // Differentiate the most common reasons for a useful toast.
+        const cell = game.map.cells.find((c) => c.col === hex.col && c.row === hex.row)
+        if (cell) {
+          if (unit.domain === 'land' && cell.terrain === 'water')
+            return rejectClick("ground unit can't enter water", hex, game)
+          if (unit.domain === 'sea' && cell.terrain !== 'water')
+            return rejectClick('ship can only travel on water', hex, game)
+        }
+        const enemyOnHex =
+          game.units.some((u) => u.side !== unit.side && u.col === hex.col && u.row === hex.row) ||
+          (game.bases ?? []).some((b) => b.side !== unit.side && b.col === hex.col && b.row === hex.row)
+        if (enemyOnHex) return rejectClick('enemy occupies that hex', hex, game)
+        const dist = hexDistance(unit.col, unit.row, hex.col, hex.row)
         return rejectClick(
-          `out of move range (${dist} > ${unit.speed})`, hex, game,
+          `out of move range (path > ${unit.speed} given terrain)`,
+          hex, game,
         )
       }
-      // Terrain check: ground can't enter water; sea can't enter land.
-      // Mountain is passable for ground but eats the whole move budget
-      // (one mountain step ends the turn) — so it's only a valid target
-      // if it's adjacent to the unit.
-      const cell = game.map.cells.find((c) => c.col === hex.col && c.row === hex.row)
-      if (cell) {
-        if (unit.domain === 'land' && cell.terrain === 'water')
-          return rejectClick('ground unit can\'t enter water', hex, game)
-        if (unit.domain === 'sea' && cell.terrain !== 'water')
-          return rejectClick('ship can only travel on water', hex, game)
-        if (unit.domain === 'land' && cell.terrain === 'mountain' &&
-            hexDistance(unit.col, unit.row, hex.col, hex.row) > 1)
-          return rejectClick('mountain step ends the turn — must be adjacent', hex, game)
-      }
-      // Refuse to step ONTO an enemy hex.
-      const enemyOnHex = game.units.some(
-        (u) => u.side !== unit.side && u.col === hex.col && u.row === hex.row,
-      ) || (game.bases ?? []).some(
-        (b) => b.side !== unit.side && b.col === hex.col && b.row === hex.row,
-      )
-      if (enemyOnHex)
-        return rejectClick('enemy occupies that hex', hex, game)
       setOrder({
         kind: 'MOVE', unit_id: unit.id,
         target_hex: [hex.col, hex.row],
