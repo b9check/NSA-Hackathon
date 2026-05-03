@@ -21,22 +21,14 @@ from engine.state import (
 from engine.terrain import TERRAIN_FROM_CHAR
 
 
-def _active_sensor_max(refs: list[SensorRef]) -> int:
-    """Effective max sensor range across only currently-active sensors."""
-    return max((s.range for s in refs if s.is_active), default=0)
-
-
 def _sensor_refs(keys: tuple[str, ...]) -> list[SensorRef]:
     out: list[SensorRef] = []
     for k in keys:
         s = SENSORS[k]
-        # Radars start INACTIVE — player must toggle them ON. Passive sensors always on.
-        is_active = (s.modality != "radar")
         out.append(SensorRef(
             key=s.key, display=s.display, modality=s.modality, range=s.range,
             los_required=s.los_required, detects_stealth=s.detects_stealth,
             target_domains=list(s.target_domains), emits=s.emits, notes=s.notes,
-            is_active=is_active,
         ))
     return out
 
@@ -72,7 +64,7 @@ def _platform_to_unit(u: dict, p: Platform) -> UnitInstance:
         domain=p.domain,
         glyph=p.glyph,
         speed=p.speed,
-        sensor=_active_sensor_max(sensors),
+        sensor=p.summary_sensor_range(),
         weapon=p.summary_weapon_range(),
         cost=p.cost,
         stealth=p.stealth,

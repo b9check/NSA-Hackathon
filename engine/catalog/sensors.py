@@ -32,24 +32,24 @@ class Sensor:
 SENSORS: dict[str, Sensor] = {
     # ---- Passive view (always on, no emissions) ----
     "passive_1": Sensor(
-        key="passive_1", display="Passive View", modality="eo", range=2,
-        notes="Crew/sensor optics; sees nearby.",
+        key="passive_1", display="Passive View", modality="eo", range=1,
+        notes="Crew/sensor optics; sees adjacent.",
     ),
     "passive_2": Sensor(
-        key="passive_2", display="Passive View", modality="eo", range=3,
+        key="passive_2", display="Passive View", modality="eo", range=2,
         notes="Wider passive sensor.",
     ),
     "passive_4": Sensor(
-        key="passive_4", display="Wide Passive View", modality="eo", range=5,
+        key="passive_4", display="Wide Passive View", modality="eo", range=4,
         notes="Drone-class wide-area passive sensor.",
     ),
     # ---- Radar (toggle, emits when ON) ----
     "radar_3": Sensor(
-        key="radar_3", display="Radar", modality="radar", range=4, emits=True,
+        key="radar_3", display="Radar", modality="radar", range=3, emits=True,
         notes="Toggle: ON to see at range, exposes the unit at long range.",
     ),
     "radar_4": Sensor(
-        key="radar_4", display="Long-Range Radar", modality="radar", range=5, emits=True,
+        key="radar_4", display="Long-Range Radar", modality="radar", range=4, emits=True,
         notes="Toggle: ON to see at range, exposes the unit at long range.",
     ),
 }

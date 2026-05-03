@@ -26,7 +26,6 @@ export interface SensorRef {
   target_domains: string[]
   emits: boolean
   notes: string
-  is_active: boolean
 }
 
 export interface WeaponRef {
