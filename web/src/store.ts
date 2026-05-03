@@ -247,11 +247,15 @@ export const useStore = create<AppState>((set, get) => ({
       )
       // Stage events for the MapStage replay. It clears them when done
       // and triggers a refetchState() to snap to the resolver's truth.
+      // Also flip the view back to omniscient so the player watches the
+      // resolution from above instead of staying locked into red's POV.
       set({
         pendingOrders: {},
         targeting: null,
         pendingEvents: events,
         eventLog: [...get().eventLog, ...annotated].slice(-200),
+        viewMode: 'omniscient',
+        selectedUnitId: null,
       })
     } catch (e) {
       console.error('resolveTurn failed', e)
