@@ -25,12 +25,14 @@ export function TopBar() {
       <div className="ml-2 text-fg">
         break enemy to {hpThresholdPct}% HP, annihilate, or higher HP% at turn {turnCap}
       </div>
-      <div className="ml-auto flex items-center gap-4">
+      <div className="ml-auto flex items-center gap-3">
         <FactionPill side="blue" />
         <FactionPill side="red" />
-        <div className="w-px h-5 bg-line" />
+        <div className="w-px h-5 bg-line mx-1" />
         <RealGameToggle />
+        <div className="w-px h-5 bg-line mx-1" />
         <ViewModeToggle />
+        <div className="w-px h-5 bg-line mx-1" />
         <RegionPicker />
       </div>
     </div>
@@ -42,11 +44,24 @@ function FactionPill({ side }: { side: 'blue' | 'red' }) {
   if (!game) return null
   const units = game.units.filter((u) => u.side === side)
   const power = units.reduce((acc, u) => acc + u.cost, 0)
-  const color = side === 'blue' ? 'text-blue' : 'text-red'
+  const accent =
+    side === 'blue'
+      ? { text: 'text-blue', bg: 'bg-blue', border: 'border-blue/40' }
+      : { text: 'text-red',  bg: 'bg-red',  border: 'border-red/40'  }
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className={`font-semibold ${color}`}>{side.toUpperCase()}</span>
-      <span className="text-mute">{units.length} units · {power} pts</span>
+    <div
+      className={[
+        'h-8 px-2.5 inline-flex items-center gap-2 rounded-sm border bg-panel2/40',
+        'font-mono text-[11px]',
+        accent.border,
+      ].join(' ')}
+      title={`${side.toUpperCase()} — ${units.length} units, ${power} cost-points`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${accent.bg}`} />
+      <span className={`${accent.text} font-semibold`}>{side.toUpperCase()}</span>
+      <span className="text-mute tabular-nums">{units.length}</span>
+      <span className="text-mute opacity-50">|</span>
+      <span className="text-mute tabular-nums">{power}<span className="opacity-60">pt</span></span>
     </div>
   )
 }
