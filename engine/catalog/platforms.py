@@ -49,7 +49,7 @@ PLATFORMS: dict[str, Platform] = {
     "infantry": Platform(
         key="infantry", display="Infantry",
         domain="land", glyph="I",
-        speed=2, hp=4, cost=20,
+        speed=2, hp=3, cost=20,
         sensors=("passive_2",),
         weapons=("inf_rifle",),
         role="Light infantry with rifle + MANPADS",
@@ -57,7 +57,7 @@ PLATFORMS: dict[str, Platform] = {
     "armor": Platform(
         key="armor", display="Armor",
         domain="land", glyph="T",
-        speed=3, hp=6, cost=50,
+        speed=4, hp=4, cost=50,
         sensors=("passive_1",),
         weapons=("armor_gun",),
         role="Heavy ground striker; mobile but blind",
@@ -65,15 +65,15 @@ PLATFORMS: dict[str, Platform] = {
     "missile_launcher": Platform(
         key="missile_launcher", display="Missile Launcher",
         domain="land", glyph="S",
-        speed=0, hp=3, cost=60,
+        speed=1, hp=3, cost=60,
         sensors=("passive_1", "radar_4"),
         weapons=("sam",),
-        role="Stationary long-range AAW; needs radar ON to see beyond 1",
+        role="Mobile long-range AAW (TEL); needs radar ON to see beyond 1",
     ),
     "scout_drone": Platform(
         key="scout_drone", display="Scout Drone",
         domain="air", glyph="U",
-        speed=4, hp=1, cost=20,
+        speed=5, hp=1, cost=20,
         scout_radius=4,
         sensors=("passive_2",),
         weapons=(),
@@ -82,7 +82,7 @@ PLATFORMS: dict[str, Platform] = {
     "strike_drone": Platform(
         key="strike_drone", display="Strike Drone",
         domain="air", glyph="K",
-        speed=3, hp=1, cost=10,
+        speed=4, hp=1, cost=10,
         sensors=("passive_1",),
         weapons=("kamikaze",),
         role="One-shot kamikaze; dies after firing",
@@ -90,7 +90,7 @@ PLATFORMS: dict[str, Platform] = {
     "fighter": Platform(
         key="fighter", display="Fighter",
         domain="air", glyph="A",
-        speed=4, hp=3, cost=100, stealth=True,
+        speed=5, hp=3, cost=100, stealth=True,
         sensors=("passive_1", "radar_3"),
         weapons=("aam_asm",),
         role="Fast multirole stealth; radar ON breaks stealth at long range",
@@ -98,7 +98,7 @@ PLATFORMS: dict[str, Platform] = {
     "bomber": Platform(
         key="bomber", display="Bomber",
         domain="air", glyph="X",
-        speed=2, hp=5, cost=80,
+        speed=3, hp=4, cost=80,
         sensors=("passive_1",),
         weapons=("bomb",),
         role="Slow heavy striker; tiny magazine; no air-to-air",
@@ -106,7 +106,7 @@ PLATFORMS: dict[str, Platform] = {
     "destroyer": Platform(
         key="destroyer", display="Destroyer",
         domain="sea", glyph="N",
-        speed=2, hp=8, cost=120,
+        speed=3, hp=5, cost=120,
         sensors=("passive_1", "radar_3"),
         weapons=("ship_battery",),
         role="Sea AAW + ASuW + land-attack; pays radar visibility tax",

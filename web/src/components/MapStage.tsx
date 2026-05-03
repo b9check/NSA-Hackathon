@@ -245,6 +245,17 @@ async function buildPixi(
     const visibleHexes = computeVisibleHexes(s, viewMode)
     const sideView = viewMode !== 'omniscient'
 
+    // ---- Fog ----
+    if (sideView) {
+      for (const cell of s.map.cells) {
+        const key = `${cell.col},${cell.row}`
+        if (visibleHexes.has(key)) continue
+        const c = cellCenters.get(key)!
+        fogGfx
+          .poly(hexCorners(c.x, c.y, HEX_SIZE * 1.04))
+          .fill({ color: 0x05080F, alpha: 0.18 })
+      }
+    }
     // No fog overlay on the terrain — both sides see the satellite map
     // and base positions at all times. Visibility only gates which
     // ENEMY UNITS get rendered (handled by the syncUnits filter below
