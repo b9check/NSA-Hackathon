@@ -317,7 +317,10 @@ async function buildPixi(
     }
   }
 
-  redraw(state, null, 'omniscient')
+  // Initial draw must use the LIVE viewMode from the store, not a
+  // hardcoded 'omniscient' — otherwise after a regen / scene-swap the
+  // remounted MapStage flashes OMNI even when real-game mode forbids it.
+  redraw(state, null, useStore.getState().viewMode)
 
   async function playEvents(events: any[], baseState: GameState): Promise<void> {
     // Resolve a few helpers up front.
