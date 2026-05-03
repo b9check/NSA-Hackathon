@@ -16,12 +16,15 @@ from engine.state import GameState
 
 # Importing controllers registers them. Add new controllers here as they land.
 import ai.random_agent  # noqa: F401  (registers "random")
+import ai.llm_agent  # noqa: F401  (registers "llm")
 
 
 log = logging.getLogger(__name__)
 
 # Per-turn ceiling. If a controller exceeds this, fall back to HOLD.
-DECIDE_TIMEOUT_S = 25.0
+# Sonnet 4.6 with extended thinking on a ~3k-token prompt typically lands
+# in 20-35s; we leave headroom.
+DECIDE_TIMEOUT_S = 60.0
 
 
 async def play_side(

@@ -32,6 +32,14 @@ from pydantic import BaseModel
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# Load .env at server boot so ANTHROPIC_API_KEY (and any future LLM creds)
+# are available before ai.* modules import the SDK and read os.environ.
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass  # python-dotenv optional; shell exports still work
+
 from scripts.setup_region import REGIONS  # noqa: E402
 from scripts.fetch_satellite import prewarm as _prewarm_region  # noqa: E402
 from engine.events import Event  # noqa: E402
