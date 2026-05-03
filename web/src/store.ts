@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import type {
   GameState,
   Order,
-  OrderKind,
   TurnInfo,
   UnitInstance,
   ViewMode,
