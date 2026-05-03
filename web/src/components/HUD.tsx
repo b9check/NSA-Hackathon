@@ -446,6 +446,79 @@ function weaponMeta(w: WeaponRef): string {
   return parts.join(' · ')
 }
 
+// Doctrinal mission templates — encode the standard NATO/USJFCOM mission
+// types, each preset with an ROE + halt profile that matches doctrine. The
+// player picks a template instead of clicking through engage/surveil/avoid.
+type MissionTemplate = {
+  key: string
+  label: string                                         // 'CAP', 'ISR', etc.
+  doctrine: string                                      // 'Combat Air Patrol'
+  description: string                                   // tooltip
+  validFor: (u: UnitInstance) => boolean                // platform suitability
+  roe: Mission['roe']
+  max_turns: number
+  halt_on_contact: boolean
+}
+
+const MISSION_TEMPLATES: MissionTemplate[] = [
+  {
+    key: 'CAP',
+    label: 'CAP',
+    doctrine: 'Combat Air Patrol',
+    description: 'Loiter over assigned hex; engage hostile air contacts that enter the patrol box.',
+    validFor: (u) => u.type === 'fighter',
+    roe: 'engage', max_turns: 30, halt_on_contact: true,
+  },
+  {
+    key: 'CAS',
+    label: 'CAS',
+    doctrine: 'Close Air Support',
+    description: 'Strike ground threats in support of friendly forces. Aggressive ROE near target.',
+    validFor: (u) => u.type === 'bomber' || u.type === 'fighter',
+    roe: 'engage', max_turns: 8, halt_on_contact: true,
+  },
+  {
+    key: 'SEAD',
+    label: 'SEAD',
+    doctrine: 'Suppression of Enemy Air Defenses',
+    description: 'Hunt active emitters. Pair with SIGINT pickup; engage SAMs first.',
+    validFor: (u) => u.type === 'fighter' || u.type === 'bomber' || u.type === 'strike_drone',
+    roe: 'engage', max_turns: 12, halt_on_contact: true,
+  },
+  {
+    key: 'ISR',
+    label: 'ISR',
+    doctrine: 'Intelligence, Surveillance, Reconnaissance',
+    description: 'Pass through area, reveal contacts, do not engage. Long endurance — runs until recalled.',
+    validFor: (u) => u.type === 'scout_drone' || u.type === 'fighter',
+    roe: 'surveil', max_turns: 30, halt_on_contact: true,
+  },
+  {
+    key: 'PICKET',
+    label: 'PICKET',
+    doctrine: 'Naval/Ground Picket Line',
+    description: 'Hold station. Engage anything that approaches weapon range.',
+    validFor: (u) => u.type === 'destroyer' || u.type === 'missile_launcher',
+    roe: 'engage', max_turns: 30, halt_on_contact: true,
+  },
+  {
+    key: 'ADV',
+    label: 'ADVANCE',
+    doctrine: 'Ground Advance to Objective',
+    description: 'Move ground forces toward target. Engage threats encountered en route.',
+    validFor: (u) => u.type === 'armor' || u.type === 'infantry' || u.type === 'missile_launcher',
+    roe: 'engage', max_turns: 12, halt_on_contact: true,
+  },
+  {
+    key: 'EVADE',
+    label: 'EVADE',
+    doctrine: 'Withdraw',
+    description: 'Move to target while breaking contact. Avoid engagement, preserve force.',
+    validFor: (_u) => true,
+    roe: 'avoid', max_turns: 30, halt_on_contact: false,
+  },
+]
+
 function MissionPanel({ unit }: { unit: UnitInstance }) {
   const game = useStore((s) => s.game)
   const setMission = useStore((s) => s.setMission)
@@ -457,72 +530,104 @@ function MissionPanel({ unit }: { unit: UnitInstance }) {
   const inTargetingForThis =
     !!targeting && targeting.unitId === unit.id && targeting.kind === 'MISSION'
 
+  // Track which template the player picked locally — applied to the mission
+  // when they pick a target. (Mission model itself doesn't carry the template
+  // identity; that's a UI affordance.)
+  const [pendingTemplate, setPendingTemplate] = React.useState<MissionTemplate | null>(null)
+
+  const validTemplates = MISSION_TEMPLATES.filter((t) => t.validFor(unit))
+
+  const onPickTemplate = (t: MissionTemplate) => {
+    setPendingTemplate(t)
+    if (mission) {
+      // Already have a mission — just update its ROE/halt to the template.
+      void setMission({
+        ...mission,
+        roe: t.roe,
+        max_turns: t.max_turns,
+        halt_on_contact: t.halt_on_contact,
+        intent: t.doctrine,
+      })
+    } else {
+      // No mission yet — enter targeting mode for the user to click a hex.
+      startTargeting(unit.id, 'MISSION')
+    }
+  }
+
   const onPickTarget = () => {
     if (inTargetingForThis) cancelTargeting()
     else startTargeting(unit.id, 'MISSION')
   }
-  const onSetRoe = (r: Mission['roe']) => {
-    if (!mission) return
-    // Surveil/avoid recon plays out across many turns — bump cap so the
-    // run loop doesn't halt for max_turns when the player wanted "go and
-    // see what's there." Engage missions stay short; they expect frequent
-    // intervention.
-    const max_turns = r === 'surveil' || r === 'avoid' ? 30 : 8
-    void setMission({ ...mission, roe: r, max_turns })
-  }
+
   const onClear = () => {
+    setPendingTemplate(null)
     void clearMission(unit.id)
   }
 
   const targetLabel = mission
     ? `(${mission.target_hex[0]}, ${mission.target_hex[1]})`
-    : 'no target'
+    : (pendingTemplate ? 'click hex to commit' : 'no target')
+
+  // Pick a template label: prefer the explicitly chosen one, else infer
+  // from current ROE.
+  const activeTpl = mission
+    ? validTemplates.find((t) =>
+        t.roe === mission.roe && t.max_turns === mission.max_turns)
+      ?? validTemplates.find((t) => t.roe === mission.roe)
+      ?? null
+    : pendingTemplate
 
   return (
     <div className="border border-line rounded-sm p-2 space-y-2">
       <div className="flex items-baseline justify-between">
         <span className="text-[10px] font-mono uppercase tracking-wider text-blue">MISSION</span>
-        {mission && (
-          <span className="text-[9px] font-mono text-mute">{mission.roe}</span>
+        {activeTpl && (
+          <span className="text-[9px] font-mono text-amber">{activeTpl.doctrine}</span>
         )}
       </div>
-      <div className="flex items-center gap-2 text-[10px]">
-        <button
-          onClick={onPickTarget}
-          className={`px-2 py-1 border rounded-sm font-mono uppercase tracking-wider transition ${
-            inTargetingForThis
-              ? 'border-amber text-amber bg-amber/10'
-              : 'border-line text-mute hover:border-blue/60 hover:text-blue'
-          }`}
-        >
-          {inTargetingForThis ? 'click hex…' : (mission ? 'change target' : 'set target')}
-        </button>
-        <span className="text-mute font-mono">{targetLabel}</span>
-      </div>
-      {mission && (
-        <>
-          <div className="flex gap-1 text-[9px] font-mono">
-            {(['engage', 'surveil', 'avoid'] as const).map((opt) => (
-              <button
-                key={opt}
-                onClick={() => onSetRoe(opt)}
-                className={`flex-1 px-1.5 py-1 border rounded-sm uppercase tracking-wider transition ${
-                  mission.roe === opt
-                    ? 'border-amber text-amber bg-amber/10'
-                    : 'border-line text-mute hover:text-fg'
-                }`}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
+
+      {/* Template picker */}
+      <div className="grid grid-cols-3 gap-1">
+        {validTemplates.map((t) => (
           <button
-            onClick={onClear}
-            className="w-full text-[10px] px-2 py-1 border border-line rounded-sm font-mono uppercase tracking-wider text-mute hover:border-red/60 hover:text-red transition"
+            key={t.key}
+            onClick={() => onPickTemplate(t)}
+            title={t.description}
+            className={`px-1.5 py-1.5 border rounded-sm font-mono text-[9px] tracking-wider transition ${
+              activeTpl?.key === t.key
+                ? 'border-amber text-amber bg-amber/10'
+                : 'border-line text-mute hover:border-blue/60 hover:text-blue'
+            }`}
           >
-            clear mission
+            {t.label}
           </button>
-        </>
+        ))}
+      </div>
+
+      {/* Target hex picker (visible once a template is chosen) */}
+      {(mission || pendingTemplate) && (
+        <div className="flex items-center gap-2 text-[10px]">
+          <button
+            onClick={onPickTarget}
+            className={`px-2 py-1 border rounded-sm font-mono uppercase tracking-wider transition ${
+              inTargetingForThis
+                ? 'border-amber text-amber bg-amber/10'
+                : 'border-line text-mute hover:border-blue/60 hover:text-blue'
+            }`}
+          >
+            {inTargetingForThis ? 'click hex…' : (mission ? 'change target' : 'set target')}
+          </button>
+          <span className="text-mute font-mono">{targetLabel}</span>
+        </div>
+      )}
+
+      {mission && (
+        <button
+          onClick={onClear}
+          className="w-full text-[10px] px-2 py-1 border border-line rounded-sm font-mono uppercase tracking-wider text-mute hover:border-red/60 hover:text-red transition"
+        >
+          clear mission
+        </button>
       )}
     </div>
   )
