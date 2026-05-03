@@ -934,8 +934,18 @@ function commitTargetingClick(
     case 'MOVE': {
       if (unit.speed <= 0) return rejectClick('stationary platform', hex, game)
       if (hex.col === unit.col && hex.row === unit.row) return false
-      if (hexDistance(unit.col, unit.row, hex.col, hex.row) > unit.speed)
-        return rejectClick('out of move range', hex, game)
+      const dist = hexDistance(unit.col, unit.row, hex.col, hex.row)
+      if (dist > unit.speed) {
+        console.warn(
+          '[move-reject] out of move range',
+          { id: unit.id, side: unit.side, type: unit.type,
+            unitPos: [unit.col, unit.row], target: [hex.col, hex.row],
+            dist, speed: unit.speed },
+        )
+        return rejectClick(
+          `out of move range (${dist} > ${unit.speed})`, hex, game,
+        )
+      }
       // Terrain check: ground can't enter water; sea can't enter land.
       // Mountain is passable for ground but eats the whole move budget
       // (one mountain step ends the turn) — so it's only a valid target
