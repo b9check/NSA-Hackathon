@@ -100,6 +100,14 @@ interface AppState {
   /** Run one full turn when both sides are AI: fire blue + red concurrently
    *  on the server, then resolve. No-op if either side is manual. */
   runAITurn: () => Promise<void>
+  /** Auto-play turn after turn until the game ends (winner != null) or
+   *  the user clicks END & LEARN. Locks the bottom action button — no
+   *  stop button by design; END & LEARN is the manual interrupt. */
+  runAIGame: () => Promise<void>
+  /** True while runAIGame is actively looping. */
+  aiGameAutoplay: boolean
+  /** Auto-play turn counter — used by the UI status badge. */
+  aiGameTurnCount: number
   /** End the current game (force-forfeit if no winner yet) + run the
    *  reflect pass to extract lessons into the memory store. */
   endGameAndReflect: (opts?: { force?: boolean }) => Promise<void>
@@ -169,6 +177,28 @@ export interface AIReasoning {
 
 export type AnnotatedEvent = any & { _turn: number; _seq: number }
 
+/** Poll the store until no AI / replay / resolve work is in flight, with
+ *  a hard ceiling so a stuck animation can't trap the autoplay loop
+ *  forever. Used between turns of the AI-vs-AI auto-play loop. */
+async function _waitUntilIdle(getStore: () => AppState, hardCapMs = 90_000): Promise<void> {
+  const start = Date.now()
+  while (true) {
+    const s = getStore()
+    if (
+      !s.replaying &&
+      !s.resolving &&
+      !s.aiThinking.blue &&
+      !s.aiThinking.red
+    ) return
+    if (Date.now() - start > hardCapMs) {
+      console.warn('runAIGame: idle wait exceeded cap, breaking')
+      return
+    }
+    await new Promise((r) => setTimeout(r, 200))
+  }
+}
+
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init)
   if (!r.ok) throw new Error(`${url} -> HTTP ${r.status}`)
@@ -230,6 +260,8 @@ export const useStore = create<AppState>((set, get) => ({
   controllers: { blue: 'manual', red: 'manual' },
   aiReasoning: { blue: null, red: null },
   aiThinking: { blue: false, red: false },
+  aiGameAutoplay: false,
+  aiGameTurnCount: 0,
   lastLessons: [],
   reflecting: false,
   showLessonsDrawer: false,
@@ -286,6 +318,8 @@ export const useStore = create<AppState>((set, get) => ({
         // to a different match. Lessons store on disk is preserved.
         aiReasoning: { blue: null, red: null },
         aiThinking: { blue: false, red: false },
+        aiGameAutoplay: false,        // breaks any in-flight autoplay loop
+        aiGameTurnCount: 0,
         lastLessons: [],
         showLessonsDrawer: false,
       })
@@ -315,6 +349,8 @@ export const useStore = create<AppState>((set, get) => ({
         hotseatReplay: null,
         aiReasoning: { blue: null, red: null },
         aiThinking: { blue: false, red: false },
+        aiGameAutoplay: false,        // breaks any in-flight autoplay loop
+        aiGameTurnCount: 0,
         lastLessons: [],
         showLessonsDrawer: false,
       })
@@ -441,6 +477,43 @@ export const useStore = create<AppState>((set, get) => ({
     await Promise.all(tasks)
     // Both sides should now be locked — resolve the turn.
     await get().resolveTurn()
+  },
+
+  runAIGame: async () => {
+    const s = get()
+    if (s.aiGameAutoplay) return
+    if (s.controllers.blue === 'manual' || s.controllers.red === 'manual') {
+      console.warn('runAIGame called but at least one side is manual')
+      return
+    }
+    set({ aiGameAutoplay: true, aiGameTurnCount: 0 })
+    try {
+      // Loop until: game has a winner, autoplay flag dropped (defensive),
+      // or game state is missing.
+      while (true) {
+        const cur = get()
+        if (!cur.aiGameAutoplay) break
+        const game = cur.game
+        if (!game) break
+        if (game.winner != null) break
+
+        // Run one full AI turn (both sides + resolve + replay events).
+        await get().runAITurn()
+
+        // Wait for animation + post-resolve refetch to settle before the
+        // next iteration. resolveTurn returns after staging events, but
+        // MapStage's playEvents → onReplayComplete chain can still be in
+        // flight. Without this, two turns' events stack and the UI
+        // freezes mid-replay.
+        await _waitUntilIdle(get)
+
+        set((st) => ({ aiGameTurnCount: st.aiGameTurnCount + 1 }))
+      }
+    } catch (e) {
+      console.error('runAIGame failed', e)
+    } finally {
+      set({ aiGameAutoplay: false })
+    }
   },
 
   refetchState: async () => {
@@ -636,6 +709,8 @@ export const useStore = create<AppState>((set, get) => ({
       hotseatReplay: null,
       aiReasoning: { blue: null, red: null },
       aiThinking: { blue: false, red: false },
+      aiGameAutoplay: false,
+      aiGameTurnCount: 0,
       lastLessons: [],
       showLessonsDrawer: false,
     })

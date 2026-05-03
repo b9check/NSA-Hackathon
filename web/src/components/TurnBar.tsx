@@ -52,6 +52,9 @@ export function TurnBar() {
   const controllers = useStore((s) => s.controllers)
   const aiThinking = useStore((s) => s.aiThinking)
   const runAITurn = useStore((s) => s.runAITurn)
+  const runAIGame = useStore((s) => s.runAIGame)
+  const aiGameAutoplay = useStore((s) => s.aiGameAutoplay)
+  const aiGameTurnCount = useStore((s) => s.aiGameTurnCount)
 
   if (!game || !turnInfo) {
     return (
@@ -139,14 +142,22 @@ export function TurnBar() {
 
       <EndGameButton />
 
-      {/* Action button: in BOTH-AI mode, single RUN AI TURN; otherwise the
-          existing RESOLVE TURN that requires both sides to be locked. */}
+      {/* Action area:
+          - BOTH AI:        [RUN AI TURN] [RUN AI GAME] (or AUTOPLAY status)
+          - mixed/manual:   [RESOLVE TURN] (existing) */}
       {controllers.blue !== 'manual' && controllers.red !== 'manual' ? (
-        <RunAITurnButton
-          onRun={runAITurn}
-          thinking={aiThinking.blue || aiThinking.red}
-          resolving={resolving}
-        />
+        aiGameAutoplay ? (
+          <AutoPlayStatus turnCount={aiGameTurnCount} />
+        ) : (
+          <div className="flex items-center gap-2">
+            <RunAITurnButton
+              onRun={runAITurn}
+              thinking={aiThinking.blue || aiThinking.red}
+              resolving={resolving}
+            />
+            <RunAIGameButton onRun={runAIGame} />
+          </div>
+        )
       ) : (
         <button
           onClick={() => canResolve && resolveTurn()}
@@ -162,6 +173,47 @@ export function TurnBar() {
           {resolving ? 'RESOLVING…' : 'RESOLVE TURN'}
         </button>
       )}
+    </div>
+  )
+}
+
+
+function RunAIGameButton({ onRun }: { onRun: () => Promise<void> }) {
+  return (
+    <button
+      onClick={() => {
+        if (!confirm(
+          'Auto-play the entire match? The AI will run turn after turn ' +
+          'until the game ends. Use END & LEARN to stop early.',
+        )) return
+        onRun()
+      }}
+      title="Lock in AI vs AI auto-play until the game ends"
+      className={[
+        'h-8 px-4 rounded-sm border tracking-widest text-[11px] font-mono',
+        'border-amber text-amber bg-amber/10 hover:bg-amber/20 transition-colors',
+      ].join(' ')}
+    >
+      RUN AI GAME
+    </button>
+  )
+}
+
+
+function AutoPlayStatus({ turnCount }: { turnCount: number }) {
+  return (
+    <div
+      title="Auto-play locked in. End & Learn to interrupt."
+      className={[
+        'h-8 px-4 inline-flex items-center gap-2 rounded-sm border',
+        'border-amber text-amber bg-amber/10',
+        'font-mono text-[11px] tracking-widest',
+      ].join(' ')}
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-amber animate-pulse" />
+      AUTO-PLAYING
+      <span className="text-amber/70">·</span>
+      <span className="tabular-nums">{turnCount} {turnCount === 1 ? 'turn' : 'turns'} done</span>
     </div>
   )
 }
