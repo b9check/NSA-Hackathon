@@ -5,7 +5,7 @@ and the future LLM agent driver. Keep field names short and JSON-friendly.
 """
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -39,9 +39,11 @@ class WeaponRef(BaseModel):
     """Denormalized snapshot of one of a unit's attached weapons."""
     key: str
     display: str
-    kind: str              # "aam" | "asm_air" | "asm_ship" | "sam" | ...
+    kind: str              # "gun" | "missile" | "sam" | "kamikaze" | "bomb"
     range: int
-    pkill: dict[str, float] = Field(default_factory=dict)
+    damage: int = 1                # deterministic HP removed per hit
+    self_destruct: bool = False    # attacker dies after firing (one-shot)
+    target_domains: list[str] = Field(default_factory=lambda: ["land", "air", "sea"])
     ammo: int = -1
     notes: str = ""
 
@@ -92,21 +94,19 @@ class BaseInstance(BaseModel):
     weapons: list[WeaponRef] = Field(default_factory=list)
 
 
-class Objective(BaseModel):
-    col: int
-    row: int
-
-
 class VictoryConfig(BaseModel):
-    capture_hold_turns: int = 2
-    combat_power_threshold: float = 0.6
+    # Side loses if its current HP total drops to <= this fraction of its
+    # starting HP total.
+    hp_loss_threshold: float = 0.25
+    # Hard cap so a turtle deadlock can't run forever. Higher HP%
+    # wins on cap; ties = draw.
+    turn_cap: int = 30
 
 
 class MapInfo(BaseModel):
     cols: int
     rows: int
     cells: list[HexCell]
-    objective_hexes: list[Objective] = Field(default_factory=list)
 
 
 class GameState(BaseModel):
@@ -122,17 +122,19 @@ class GameState(BaseModel):
     # doesn't artificially flatten when destroyed units leave the list.
     # Keys: "blue", "red".
     starting_total: dict[str, float] = Field(default_factory=dict)
-    # Accumulated objective-control bonus, capped per side. Drives the
-    # second half of compute_scores().
-    objective_points: dict[str, float] = Field(
-        default_factory=lambda: {"blue": 0.0, "red": 0.0},
-    )
+    # Total HP at game start (units + bases), per side. Denominator for
+    # the HP-threshold win condition.
+    starting_hp: dict[str, int] = Field(default_factory=dict)
+    # Game-over decision once the winner is determined. None = match
+    # in progress.
+    winner: Optional[str] = None       # "blue" | "red" | "draw" | None
+    win_reason: Optional[str] = None   # "hp_collapse" | "turn_cap" | "annihilation"
 
-    def unit_by_id(self, uid: str) -> UnitInstance | None:
+    def unit_by_id(self, uid: str) -> Optional[UnitInstance]:
         return next((u for u in self.units if u.id == uid), None)
 
     def units_at(self, col: int, row: int) -> list[UnitInstance]:
         return [u for u in self.units if u.col == col and u.row == row]
 
-    def base_by_id(self, bid: str) -> BaseInstance | None:
+    def base_by_id(self, bid: str) -> Optional[BaseInstance]:
         return next((b for b in self.bases if b.id == bid), None)

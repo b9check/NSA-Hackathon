@@ -2,7 +2,7 @@ import { useStore } from '../store'
 import type { BaseInstance, SensorRef, UnitInstance, WeaponRef } from '../types'
 import { ActionMenu } from './ActionMenu'
 import { RegionPicker } from './RegionPicker'
-import { ViewModeToggle } from './ViewModeToggle'
+import { ViewModeToggle, RealGameToggle } from './ViewModeToggle'
 
 const DOMAIN_LABEL: Record<string, string> = {
   air: 'AIR',
@@ -14,39 +14,51 @@ const DOMAIN_LABEL: Record<string, string> = {
 export function TopBar() {
   const game = useStore((s) => s.game)
   if (!game) return null
-  const blueObj = game.objective_points?.blue ?? 0
-  const redObj = game.objective_points?.red ?? 0
+  const v = game.victory
+  const hpThresholdPct = Math.round((v?.hp_loss_threshold ?? 0.25) * 100)
+  const turnCap = v?.turn_cap ?? 30
   return (
     <div className="h-12 bg-panel border-b border-line flex items-center px-5 text-sm font-mono">
       <div className="text-amber font-semibold tracking-widest">{game.name.toUpperCase()}</div>
-      <div className="mx-6 text-mute">|</div>
-      <div className="text-mute">WIN</div>
-      <div className="ml-2 text-fg">
-        highest score in 5:00
+      <div className="mx-5 w-px h-5 bg-line" />
+      <span className="text-[10px] tracking-[0.2em] text-mute mr-2">WIN&nbsp;IF</span>
+      <div className="flex items-center gap-1.5 mr-6">
+        <WinChip label={`HP ≤ ${hpThresholdPct}%`}  tip={`Break enemy total HP below ${hpThresholdPct}% of starting`} />
+        <WinChipSep />
+        <WinChip label="ANNIHILATION"               tip="Eliminate every enemy unit AND base" />
+        <WinChipSep />
+        <WinChip label={`T${turnCap} HP%`}          tip={`At turn ${turnCap}, side with higher HP%% wins (tie = draw)`} />
       </div>
-      <div className="mx-6 text-mute">|</div>
-      <div className="text-mute">OBJECTIVES</div>
-      <div className="ml-2 flex items-center gap-2">
-        <span className="text-amber">{game.map.objective_hexes.length}</span>
-        <span className="text-mute text-xs">+5/turn ea, cap +30</span>
-        {(blueObj > 0 || redObj > 0) && (
-          <>
-            <span className="text-mute mx-1">·</span>
-            <span className="text-blue">B {blueObj.toFixed(0)}</span>
-            <span className="text-mute">/</span>
-            <span className="text-red">R {redObj.toFixed(0)}</span>
-          </>
-        )}
-      </div>
-      <div className="ml-auto flex items-center gap-4">
+      <div className="ml-auto flex items-center gap-3 flex-shrink-0">
         <FactionPill side="blue" />
         <FactionPill side="red" />
-        <div className="w-px h-5 bg-line" />
+        <div className="w-px h-5 bg-line mx-1" />
+        <RealGameToggle />
+        <div className="w-px h-5 bg-line mx-1" />
         <ViewModeToggle />
+        <div className="w-px h-5 bg-line mx-1" />
         <RegionPicker />
       </div>
     </div>
   )
+}
+
+
+function WinChip({ label, tip }: { label: string; tip: string }) {
+  return (
+    <span
+      title={tip}
+      className="h-7 px-2.5 inline-flex items-center rounded-sm border border-line/80
+                 bg-panel2/40 text-[10px] font-mono text-fg tracking-wider whitespace-nowrap"
+    >
+      {label}
+    </span>
+  )
+}
+
+
+function WinChipSep() {
+  return <span className="text-mute text-[10px] tracking-widest opacity-50">OR</span>
 }
 
 function FactionPill({ side }: { side: 'blue' | 'red' }) {
@@ -54,11 +66,24 @@ function FactionPill({ side }: { side: 'blue' | 'red' }) {
   if (!game) return null
   const units = game.units.filter((u) => u.side === side)
   const power = units.reduce((acc, u) => acc + u.cost, 0)
-  const color = side === 'blue' ? 'text-blue' : 'text-red'
+  const accent =
+    side === 'blue'
+      ? { text: 'text-blue', bg: 'bg-blue', border: 'border-blue/40' }
+      : { text: 'text-red',  bg: 'bg-red',  border: 'border-red/40'  }
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className={`font-semibold ${color}`}>{side.toUpperCase()}</span>
-      <span className="text-mute">{units.length} units · {power} pts</span>
+    <div
+      className={[
+        'h-8 px-2.5 inline-flex items-center gap-2 rounded-sm border bg-panel2/40',
+        'font-mono text-[11px]',
+        accent.border,
+      ].join(' ')}
+      title={`${side.toUpperCase()} — ${units.length} units, ${power} cost-points`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${accent.bg}`} />
+      <span className={`${accent.text} font-semibold`}>{side.toUpperCase()}</span>
+      <span className="text-mute tabular-nums">{units.length}</span>
+      <span className="text-mute opacity-50">|</span>
+      <span className="text-mute tabular-nums">{power}<span className="opacity-60">pt</span></span>
     </div>
   )
 }
@@ -311,24 +336,19 @@ const SENSOR_BADGE: Record<string, string> = {
 
 function humanKind(k: WeaponRef['kind']): string {
   return ({
-    aam: 'AAM',
-    asm_air: 'ASM',
-    asm_ship: 'ASM',
+    gun: 'GUN',
+    missile: 'MISSILE',
     sam: 'SAM',
-    gun_naval: 'GUN',
-    gun_armor: 'GUN',
-    manpads: 'MANPADS',
-    loitering: 'LOITER',
+    kamikaze: 'OWA',
+    bomb: 'BOMB',
   } as Record<string, string>)[k] ?? k.toUpperCase()
 }
 
 function weaponMeta(w: WeaponRef): string {
-  const parts: string[] = [`r${w.range}`]
+  const parts: string[] = [`r${w.range}`, `${w.damage}dmg`]
   if (w.ammo > 0) parts.push(`${w.ammo}rd`)
-  const pk = Object.entries(w.pkill)
-    .map(([d, p]) => `${d[0].toUpperCase()}=${p.toFixed(2)}`)
-    .join(' ')
-  if (pk) parts.push(pk)
+  if (w.ammo === -1) parts.push('∞')
+  if (w.self_destruct) parts.push('SD')
   return parts.join(' · ')
 }
 

@@ -16,8 +16,8 @@ export function EndGameOverlay() {
   const tagline =
     info.winner === 'draw' ? 'STALEMATE'
     : info.reason === 'annihilation' ? 'TOTAL VICTORY'
-    : info.reason === 'objective' ? 'OBJECTIVES SECURED'
-    : 'TIME ENDED'
+    : info.reason === 'hp_collapse' ? 'FORCE BROKEN'
+    : 'TURN CAP REACHED'
 
   const onReplay = async () => {
     await reroll()
@@ -26,7 +26,6 @@ export function EndGameOverlay() {
   }
   const onDismiss = () => {
     // Clear the overlay but keep state frozen — useful to show the final map.
-    useStore.getState().endMatch(null as any) // null clears via the setter
     useStore.setState({ gameOver: null })
   }
 
@@ -45,8 +44,8 @@ export function EndGameOverlay() {
           </div>
         )}
         <div className="grid grid-cols-2 gap-6 mb-6">
-          <ScoreRow side="blue" score={info.blue_score} winner={info.winner} />
-          <ScoreRow side="red"  score={info.red_score}  winner={info.winner} />
+          <ScoreRow side="blue" pct={info.blue_hp_pct} winner={info.winner} />
+          <ScoreRow side="red"  pct={info.red_hp_pct}  winner={info.winner} />
         </div>
         <div className="flex gap-3">
           <button
@@ -68,9 +67,9 @@ export function EndGameOverlay() {
 }
 
 
-function ScoreRow({ side, score, winner }: {
+function ScoreRow({ side, pct, winner }: {
   side: 'blue' | 'red'
-  score: number
+  pct: number
   winner: 'blue' | 'red' | 'draw'
 }) {
   const c = side === 'blue' ? 'text-blue' : 'text-red'
@@ -78,11 +77,11 @@ function ScoreRow({ side, score, winner }: {
   return (
     <div>
       <div className={`text-[10px] font-mono tracking-widest ${c} mb-1`}>
-        {side.toUpperCase()}
+        {side.toUpperCase()} HP
         {won && <span className="ml-2 text-amber">★</span>}
       </div>
       <div className="text-2xl font-mono tabular-nums text-fg">
-        {score.toFixed(1)}
+        {(pct * 100).toFixed(0)}%
       </div>
     </div>
   )

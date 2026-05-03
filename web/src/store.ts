@@ -35,6 +35,10 @@ interface AppState {
   swapping: boolean
   swapError: string | null
   viewMode: ViewMode
+  /** When true, OMNI view is disabled and the game auto-snaps the
+   *  camera back to the *queueing* side after RESOLVE TURN, so two
+   *  humans can hot-seat without seeing each other's intel. */
+  realGame: boolean
   // Turn flow
   turnInfo: TurnInfo | null
   pendingOrders: Record<string, Order> // keyed by unit_id
@@ -46,11 +50,17 @@ interface AppState {
   /** True while MapStage is mid-replay; redraw() short-circuits so
    *  syncUnits doesn't snap positions and clobber move tweens. */
   replaying: boolean
+  /** Hot-seat two-POV replay. After resolve in real-game mode the
+   *  animation plays once per side. The store snapshots the pre-resolve
+   *  state, then orchestrates pass 1 (BLUE), pass 2 (RED), and finally
+   *  refetches the resolver's truth and settles back to BLUE. */
+  hotseatReplay: null | {
+    phase: 'blue' | 'red' | 'settle'
+    events: any[]
+    /** Pre-resolve state, used to start each pass from the same point. */
+    snapshot: GameState
+  }
 
-  // Match timer (5 minutes total budget; pauses during replay / game-over).
-  matchSeconds: number       // total budget
-  matchElapsed: number       // seconds already spent
-  matchStarted: boolean
   gameOver: GameOverInfo | null
 
   // Battle narrative — full event history, prefixed with the turn each
@@ -62,6 +72,7 @@ interface AppState {
   setHover: (h: { col: number; row: number } | null) => void
   selectedUnit: () => UnitInstance | null
   setViewMode: (m: ViewMode) => void
+  toggleRealGame: () => void
 
   loadRegions: () => Promise<void>
   swapRegion: (key: string) => Promise<void>
@@ -85,19 +96,21 @@ interface AppState {
 
   setPendingEvents: (events: any[] | null) => void
   setReplaying: (b: boolean) => void
+  /** Called by MapStage when an animation pass completes. In hot-seat
+   *  mode, advances the two-POV replay; in normal mode, refetches
+   *  state.json and settles. */
+  onReplayComplete: () => void
 
-  startMatch: () => void
-  tickMatch: (dt: number) => void   // dt in seconds
   resetMatch: () => void
-  endMatch: (info: GameOverInfo) => void
+  endMatch: (info: GameOverInfo | null) => void
 }
 
 
 export interface GameOverInfo {
   winner: 'blue' | 'red' | 'draw'
-  reason: 'annihilation' | 'timer' | 'objective'
-  blue_score: number
-  red_score: number
+  reason: 'hp_collapse' | 'turn_cap' | 'annihilation'
+  blue_hp_pct: number
+  red_hp_pct: number
   turn: number
 }
 
@@ -110,6 +123,13 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return (await r.json()) as T
 }
 
+// Persist a single bit (real-game mode) across reloads. Stored as
+// 'wargame.realGame' = '1' | '0'. Anything else = false.
+const REAL_GAME_KEY = 'wargame.realGame'
+const initialRealGame = (() => {
+  try { return localStorage.getItem(REAL_GAME_KEY) === '1' } catch { return false }
+})()
+
 export const useStore = create<AppState>((set, get) => ({
   game: null,
   selectedUnitId: null,
@@ -118,16 +138,17 @@ export const useStore = create<AppState>((set, get) => ({
   assetVersion: 1,
   swapping: false,
   swapError: null,
-  viewMode: 'omniscient',
+  // If real-game was on last session, default the camera to BLUE rather
+  // than OMNI (which is hidden in real-game).
+  viewMode: initialRealGame ? 'blue' : 'omniscient',
+  realGame: initialRealGame,
   turnInfo: null,
   pendingOrders: {},
   targeting: null,
   resolving: false,
   pendingEvents: null,
   replaying: false,
-  matchSeconds: 300,
-  matchElapsed: 0,
-  matchStarted: false,
+  hotseatReplay: null,
   gameOver: null,
   eventLog: [],
 
@@ -139,7 +160,18 @@ export const useStore = create<AppState>((set, get) => ({
     if (!game || !selectedUnitId) return null
     return game.units.find((u) => u.id === selectedUnitId) ?? null
   },
-  setViewMode: (m) => set({ viewMode: m, selectedUnitId: null }),
+  setViewMode: (m) => set((s) => {
+    // While real-game is on, OMNI is forbidden — coerce to 'blue'.
+    const safe = s.realGame && m === 'omniscient' ? 'blue' : m
+    return { viewMode: safe, selectedUnitId: null }
+  }),
+  toggleRealGame: () => set((s) => {
+    const realGame = !s.realGame
+    try { localStorage.setItem(REAL_GAME_KEY, realGame ? '1' : '0') } catch {}
+    // When switching INTO real-game, kick the player off OMNI.
+    const viewMode = realGame && s.viewMode === 'omniscient' ? 'blue' : s.viewMode
+    return { realGame, viewMode, selectedUnitId: null }
+  }),
 
   loadRegions: async () => {
     try {
@@ -254,14 +286,40 @@ export const useStore = create<AppState>((set, get) => ({
       const annotated: AnnotatedEvent[] = events.map(
         (e: any, i: number) => ({ ...e, _turn: startTurn, _seq: seqBase + i }),
       )
-      // Stage events for the MapStage replay. It clears them when done
-      // and triggers a refetchState() to snap to the resolver's truth.
-      set({
-        pendingOrders: {},
-        targeting: null,
-        pendingEvents: events,
-        eventLog: [...get().eventLog, ...annotated].slice(-200),
-      })
+      const baseState = get().game
+      const realGame = get().realGame
+      if (realGame && baseState) {
+        // Hot-seat: animate twice — once from BLUE POV, once from RED.
+        // Snapshot the pre-resolve state so each pass starts from the
+        // same baseline. MapStage's onReplayComplete advances the
+        // phases (blue -> red -> settle).
+        const snapshot = JSON.parse(JSON.stringify(baseState)) as GameState
+        set({
+          pendingOrders: {},
+          targeting: null,
+          pendingEvents: [...events],
+          eventLog: [...get().eventLog, ...annotated].slice(-200),
+          selectedUnitId: null,
+          viewMode: 'blue',
+          game: snapshot,
+          hotseatReplay: {
+            phase: 'blue',
+            events: [...events],
+            snapshot,
+          },
+        })
+      } else {
+        // Normal flow — single pass; MapStage refetches state on
+        // completion and settles to OMNI.
+        set({
+          pendingOrders: {},
+          targeting: null,
+          pendingEvents: events,
+          eventLog: [...get().eventLog, ...annotated].slice(-200),
+          selectedUnitId: null,
+          viewMode: 'omniscient',
+        })
+      }
     } catch (e) {
       console.error('resolveTurn failed', e)
     } finally {
@@ -272,34 +330,42 @@ export const useStore = create<AppState>((set, get) => ({
   setPendingEvents: (events) => set({ pendingEvents: events }),
   setReplaying: (b) => set({ replaying: b }),
 
-  startMatch: () => set((s) => s.matchStarted ? {} : { matchStarted: true }),
-
-  tickMatch: (dt) => {
-    const s = get()
-    if (!s.matchStarted || s.replaying || s.resolving || s.gameOver) return
-    const next = s.matchElapsed + dt
-    if (next >= s.matchSeconds) {
-      // Timer expired -> end match by score.
-      const ti = s.turnInfo
-      const blue = ti?.blue_score ?? 0
-      const red = ti?.red_score ?? 0
+  onReplayComplete: () => {
+    const hr = get().hotseatReplay
+    if (!hr) {
+      // Normal flow: clear and refetch.
+      set({ pendingEvents: null, replaying: false })
+      get().refetchState().catch(() => {})
+      return
+    }
+    if (hr.phase === 'blue') {
+      // Pass 1 done — start RED pass from the same snapshot.
+      const fresh = JSON.parse(JSON.stringify(hr.snapshot))
       set({
-        matchElapsed: s.matchSeconds,
-        gameOver: {
-          winner: blue === red ? 'draw' : blue > red ? 'blue' : 'red',
-          reason: 'timer',
-          blue_score: blue, red_score: red,
-          turn: ti?.turn ?? 0,
-        },
+        replaying: false,
+        viewMode: 'red',
+        game: fresh,
+        pendingEvents: [...hr.events],
+        hotseatReplay: { ...hr, phase: 'red' },
+      })
+    } else if (hr.phase === 'red') {
+      // Pass 2 done — refetch resolver truth and settle on BLUE.
+      set({
+        replaying: false,
+        pendingEvents: null,
+        hotseatReplay: { ...hr, phase: 'settle' },
+        viewMode: 'blue',
+      })
+      get().refetchState().finally(() => {
+        set({ hotseatReplay: null })
       })
     } else {
-      set({ matchElapsed: next })
+      // Already settling — no-op safeguard.
+      set({ pendingEvents: null, replaying: false, hotseatReplay: null })
     }
   },
 
-  resetMatch: () => set({
-    matchElapsed: 0, matchStarted: false, gameOver: null,
-  }),
+  resetMatch: () => set({ gameOver: null }),
 
   endMatch: (info) => set({ gameOver: info }),
 }))

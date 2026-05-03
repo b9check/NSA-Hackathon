@@ -10,16 +10,10 @@ export interface HexCell {
   terrain: Terrain
 }
 
-export interface Objective {
-  col: number
-  row: number
-}
-
 export interface MapInfo {
   cols: number
   rows: number
   cells: HexCell[]
-  objective_hexes: Objective[]
 }
 
 export interface SensorRef {
@@ -37,17 +31,12 @@ export interface SensorRef {
 export interface WeaponRef {
   key: string
   display: string
-  kind:
-    | 'aam'
-    | 'asm_air'
-    | 'asm_ship'
-    | 'sam'
-    | 'gun_naval'
-    | 'gun_armor'
-    | 'manpads'
-    | 'loitering'
+  kind: 'gun' | 'missile' | 'sam' | 'kamikaze' | 'bomb'
   range: number
-  pkill: Record<string, number>
+  damage: number
+  self_destruct: boolean
+  /** Which target domains this weapon can damage. Empty/missing => any. */
+  target_domains: string[]
   ammo: number
   notes: string
 }
@@ -94,9 +83,11 @@ export interface BaseInstance {
 }
 
 export interface VictoryConfig {
-  capture_hold_turns: number
-  combat_power_threshold: number
+  hp_loss_threshold: number
+  turn_cap: number
 }
+
+export type WinReason = 'hp_collapse' | 'turn_cap' | 'annihilation'
 
 export interface GameState {
   name: string
@@ -108,7 +99,9 @@ export interface GameState {
   bases: BaseInstance[]
   victory: VictoryConfig
   starting_total?: Record<string, number>
-  objective_points?: Record<string, number>
+  starting_hp?: Record<string, number>
+  winner?: 'blue' | 'red' | 'draw' | null
+  win_reason?: WinReason | null
 }
 
 
@@ -119,15 +112,13 @@ export type OrderKind =
   | 'SCOUT'
   | 'OVERWATCH'
   | 'HOLD'
-  | 'CAPTURE'
 
 export type Order =
   | { kind: 'MOVE'; unit_id: string; target_hex: [number, number]; intent?: string }
-  | { kind: 'STRIKE'; unit_id: string; target_id: string; intent?: string }
-  | { kind: 'SCOUT'; unit_id: string; target_hex: [number, number]; intent?: string }
+  | { kind: 'STRIKE'; unit_id: string; target_hex: [number, number]; intent?: string }
+  | { kind: 'SCOUT'; unit_id: string; intent?: string }
   | { kind: 'OVERWATCH'; unit_id: string; intent?: string }
   | { kind: 'HOLD'; unit_id: string; intent?: string }
-  | { kind: 'CAPTURE'; unit_id: string; target_hex: [number, number]; intent?: string }
 
 
 export interface TurnInfo {
