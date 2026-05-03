@@ -20,10 +20,14 @@ export function TopBar() {
   return (
     <div className="h-12 bg-panel border-b border-line flex items-center px-5 text-sm font-mono">
       <div className="text-amber font-semibold tracking-widest">{game.name.toUpperCase()}</div>
-      <div className="mx-6 text-mute">|</div>
-      <div className="text-mute">WIN</div>
-      <div className="ml-2 text-fg">
-        break enemy to {hpThresholdPct}% HP, annihilate, or higher HP% at turn {turnCap}
+      <div className="mx-5 w-px h-5 bg-line" />
+      <span className="text-[10px] tracking-[0.2em] text-mute mr-2">WIN&nbsp;IF</span>
+      <div className="flex items-center gap-1.5">
+        <WinChip label={`HP ≤ ${hpThresholdPct}%`}  tip={`Break enemy total HP below ${hpThresholdPct}% of starting`} />
+        <WinChipSep />
+        <WinChip label="ANNIHILATION"               tip="Eliminate every enemy unit AND base" />
+        <WinChipSep />
+        <WinChip label={`T${turnCap} • HIGHER HP`}  tip={`At turn ${turnCap}, side with higher HP%% wins (tie = draw)`} />
       </div>
       <div className="ml-auto flex items-center gap-3">
         <FactionPill side="blue" />
@@ -37,6 +41,24 @@ export function TopBar() {
       </div>
     </div>
   )
+}
+
+
+function WinChip({ label, tip }: { label: string; tip: string }) {
+  return (
+    <span
+      title={tip}
+      className="h-7 px-2.5 inline-flex items-center rounded-sm border border-line/80
+                 bg-panel2/40 text-[10px] font-mono text-fg tracking-wider whitespace-nowrap"
+    >
+      {label}
+    </span>
+  )
+}
+
+
+function WinChipSep() {
+  return <span className="text-mute text-[10px] tracking-widest opacity-50">OR</span>
 }
 
 function FactionPill({ side }: { side: 'blue' | 'red' }) {
