@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { useStore } from '../store'
 import type { BaseInstance, SensorRef, UnitInstance, WeaponRef } from '../types'
 import { ActionMenu } from './ActionMenu'
@@ -101,18 +102,6 @@ export function RightRail() {
 
   return (
     <div className="w-[360px] bg-panel border-l border-line flex flex-col h-full text-sm min-h-0">
-      <Section title="ORDER OF BATTLE" maxH="max-h-[13rem]">
-        <RosterGroup label="BLUE" side="blue" units={blue} selectedId={selectedUnitId} onSelect={selectUnit} />
-        <div className="h-2" />
-        <RosterGroup label="RED" side="red" units={red} selectedId={selectedUnitId} onSelect={selectUnit} />
-      </Section>
-      {(blueBases.length > 0 || redBases.length > 0) && (
-        <Section title="BASES" maxH="max-h-[7rem]">
-          {blueBases.length > 0 && <BaseGroup label="BLUE" side="blue" bases={blueBases} />}
-          {blueBases.length > 0 && redBases.length > 0 && <div className="h-2" />}
-          {redBases.length > 0 && <BaseGroup label="RED" side="red" bases={redBases} />}
-        </Section>
-      )}
       <Section title="SELECTED UNIT" grow>
         {selected ? <UnitDetail unit={selected} /> : <Empty />}
       </Section>
@@ -299,16 +288,7 @@ function UnitDetail({ unit }: { unit: UnitInstance }) {
         <Stat label="GLYPH"  value={unit.glyph} />
       </div>
       {unit.sensors.length > 0 && (
-        <SubsystemList
-          title="SENSORS"
-          items={unit.sensors.map((s) => ({
-            key: s.key,
-            primary: s.display,
-            badge: s.modality,
-            badgeClass: SENSOR_BADGE[s.modality] ?? 'text-mute',
-            meta: `range ${s.range}${s.emits ? ' · emits' : ''}${s.los_required ? ' · LOS' : ''}`,
-          }))}
-        />
+        <SensorList unitId={unit.id} sensors={unit.sensors} canCommand={canCommand} />
       )}
       {unit.weapons.length > 0 && (
         <SubsystemList
@@ -350,6 +330,73 @@ function weaponMeta(w: WeaponRef): string {
   if (w.ammo === -1) parts.push('∞')
   if (w.self_destruct) parts.push('SD')
   return parts.join(' · ')
+}
+
+function SensorList({
+  unitId, sensors, canCommand,
+}: {
+  unitId: string
+  sensors: SensorRef[]
+  canCommand: boolean
+}) {
+  const toggleSensor = useStore((s) => s.toggleSensor)
+  const [pendingKey, setPendingKey] = React.useState<string | null>(null)
+  const onToggle = async (key: string, active: boolean) => {
+    setPendingKey(key)
+    try {
+      await toggleSensor(unitId, key, active)
+    } finally {
+      setPendingKey(null)
+    }
+  }
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] tracking-widest text-mute mb-1.5 font-mono">SENSORS</div>
+      <div className="space-y-1">
+        {sensors.map((s) => {
+          const togglable = s.modality === 'radar'
+          const on = s.is_active
+          return (
+            <div key={s.key} className="border border-line rounded-sm px-2 py-1 min-w-0">
+              <div className="flex items-baseline justify-between gap-2 min-w-0">
+                <span className="text-[11px] text-fg truncate min-w-0 flex-1">
+                  {s.display}
+                </span>
+                <span
+                  className={`shrink-0 text-[9px] font-mono uppercase tracking-wider ${SENSOR_BADGE[s.modality] ?? 'text-mute'}`}
+                >
+                  {s.modality}
+                </span>
+              </div>
+              <div className="flex items-center justify-between mt-0.5 gap-2">
+                <span className="text-[10px] font-mono text-mute">
+                  range {s.range}{s.emits ? ' · emits' : ''}{s.los_required ? ' · LOS' : ''}
+                </span>
+                {togglable ? (
+                  <button
+                    disabled={!canCommand || pendingKey === s.key}
+                    onClick={() => onToggle(s.key, !on)}
+                    className={`shrink-0 text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-sm border transition ${
+                      on
+                        ? 'border-amber/60 text-amber bg-amber/10'
+                        : 'border-line text-mute hover:border-blue/60 hover:text-blue'
+                    } ${!canCommand ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                    title={canCommand ? (on ? 'Click to turn OFF' : 'Click to turn ON') : 'Other side'}
+                  >
+                    {on ? 'ON' : 'OFF'}
+                  </button>
+                ) : (
+                  <span className="shrink-0 text-[9px] font-mono uppercase tracking-wider text-mute">
+                    PASSIVE
+                  </span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 function SubsystemList({

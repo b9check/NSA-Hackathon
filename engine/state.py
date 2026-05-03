@@ -33,6 +33,8 @@ class SensorRef(BaseModel):
     target_domains: list[str] = Field(default_factory=list)
     emits: bool = False
     notes: str = ""
+    # Toggle: only meaningful for `radar` modality. Passive sensors are always on.
+    is_active: bool = True
 
 
 class WeaponRef(BaseModel):
@@ -100,7 +102,7 @@ class VictoryConfig(BaseModel):
     hp_loss_threshold: float = 0.25
     # Hard cap so a turtle deadlock can't run forever. Higher HP%
     # wins on cap; ties = draw.
-    turn_cap: int = 30
+    turn_cap: int = 20
 
 
 class MapInfo(BaseModel):

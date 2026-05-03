@@ -249,7 +249,7 @@ async function buildPixi(
         const c = cellCenters.get(key)!
         fogGfx
           .poly(hexCorners(c.x, c.y, HEX_SIZE * 1.04))
-          .fill({ color: 0x05080F, alpha: 0.78 })
+          .fill({ color: 0x05080F, alpha: 0.18 })
       }
     }
 

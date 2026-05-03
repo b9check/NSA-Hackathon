@@ -78,6 +78,7 @@ interface AppState {
   swapRegion: (key: string) => Promise<void>
   reroll: () => Promise<void>
   refetchState: () => Promise<void>
+  toggleSensor: (unitId: string, sensorKey: string, active: boolean) => Promise<void>
 
   // ---- Turn flow -------------------------------------------------
   /** Pull the latest turn meta (scores, locks, counts) from /api/turn. */
@@ -223,6 +224,17 @@ export const useStore = create<AppState>((set, get) => ({
     set({ game })
     // Pull turn meta in parallel; don't block on failure.
     get().refetchTurn().catch(() => {})
+  },
+
+  toggleSensor: async (unitId, sensorKey, active) => {
+    await fetchJson('/api/sensor/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unit_id: unitId, sensor_key: sensorKey, active }),
+    })
+    // Bump asset version so the next refetch dodges the static file cache.
+    set({ assetVersion: get().assetVersion + 1 })
+    await get().refetchState()
   },
 
   refetchTurn: async () => {
