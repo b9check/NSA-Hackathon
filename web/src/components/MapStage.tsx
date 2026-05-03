@@ -130,13 +130,12 @@ async function buildPixi(
   app.stage.addChild(root)
 
   const gridLayer = new Container()
-  const fogLayer = new Container() // dims non-visible hexes in side views
-  const overlayLayer = new Container() // objective ring, reachability, ranges
+  const overlayLayer = new Container() // reachability, ranges
   const orderLayer = new Container() // queued-order arrows / reticles
   const hoverLayer = new Container()
   const unitLayer = new Container()
   const fxLayer = new Container() // tracers, particles, popups
-  root.addChild(gridLayer, fogLayer, overlayLayer, orderLayer, hoverLayer, unitLayer, fxLayer)
+  root.addChild(gridLayer, overlayLayer, orderLayer, hoverLayer, unitLayer, fxLayer)
 
   // Pre-compute hex centers
   const cellCenters = new Map<string, { x: number; y: number; cell: HexCell }>()
@@ -146,9 +145,11 @@ async function buildPixi(
   }
 
   // ---- Last-known-position memory (per observer side) ----
-  // Each side remembers where it last *saw* enemy units / bases. Entries
-  // older than LKP_DECAY turns are purged. Only consulted in side views.
-  const LKP_DECAY = 3
+  // Each side remembers where it last *saw* enemy units / bases. The
+  // ghost survives as long as the unit hasn't moved from where we left
+  // it; the moment the engine's truth puts the unit on a different hex
+  // from the ghost, we invalidate (we'd realize on next look that they
+  // aren't there anymore — but we don't know where they went).
   type Lkp = { col: number; row: number; turn: number; isBase: boolean; type: string }
   const lastSeen: Record<'blue' | 'red', Map<string, Lkp>> = {
     blue: new Map(),
@@ -197,15 +198,19 @@ async function buildPixi(
       onPointerDown(null, null)
       return
     }
-    const u = state.units.find((u) => u.col === hex.col && u.row === hex.row)
+    // Read the LIVE game state, not the captured initialGame. Otherwise
+    // clicks always hit unit positions from the moment Pixi was built —
+    // so after a unit moves or dies, clicks on the new position miss it
+    // and clicks on the old position still find a stale unit.
+    const liveGame = useStore.getState().game
+    const units = liveGame ? liveGame.units : state.units
+    const u = units.find((u) => u.col === hex.col && u.row === hex.row)
     onPointerDown(hex, u ?? null)
   })
 
-  // ---- Selection / overlays / fog / orders ----
+  // ---- Selection / overlays / orders ----
   const overlay = new Graphics()
   overlayLayer.addChild(overlay)
-  const fogGfx = new Graphics()
-  fogLayer.addChild(fogGfx)
   const orderGfx = new Graphics()
   orderLayer.addChild(orderGfx)
   const selectionGfx = new Graphics()
@@ -230,7 +235,6 @@ async function buildPixi(
     viewMode: ViewMode,
   ) {
     overlay.clear()
-    fogGfx.clear()
     orderGfx.clear()
     selectionGfx.clear()
 
@@ -252,6 +256,10 @@ async function buildPixi(
           .fill({ color: 0x05080F, alpha: 0.18 })
       }
     }
+    // No fog overlay on the terrain — both sides see the satellite map
+    // and base positions at all times. Visibility only gates which
+    // ENEMY UNITS get rendered (handled by the syncUnits filter below
+    // and the ghost overlays).
 
     if (selected) {
       drawReachability(overlay, s, selected, cellCenters)
@@ -282,13 +290,21 @@ async function buildPixi(
           })
         }
       }
-      // Purge stale or no-longer-extant entries.
+      // Invalidate ghosts whose unit isn't where we last saw it. Engine
+      // truth: if the entity has moved off the LKP hex (or is gone), we
+      // would notice "they're not there anymore" — so the ghost dies.
+      // If they didn't move, the ghost stays at its hex.
       for (const [id, lkp] of myMap) {
-        const stillExists =
-          lkp.isBase
-            ? (s.bases ?? []).some((x) => x.id === id)
-            : s.units.some((x) => x.id === id)
-        if (!stillExists || s.turn - lkp.turn > LKP_DECAY) myMap.delete(id)
+        const cur = lkp.isBase
+          ? (s.bases ?? []).find((b) => b.id === id)
+          : s.units.find((u) => u.id === id)
+        if (!cur) {
+          myMap.delete(id)
+          continue
+        }
+        if (cur.col !== lkp.col || cur.row !== lkp.row) {
+          myMap.delete(id)
+        }
       }
       // Draw ghosts for entries that aren't currently visible.
       drawLastKnownGhosts(overlay, s, viewMode, visibleHexes, myMap, cellCenters)
@@ -328,6 +344,93 @@ async function buildPixi(
     const basesById = new Map((baseState.bases ?? []).map((b) => [b.id, b]))
     const nodeFor = (id: string) => unitNodes.get(id) ?? baseNodes.get(id)
 
+    // Visibility filter for replay: in side-views, hide enemy actions
+    // whose origin / path / target the observer can't sense. Coverage
+    // is DYNAMIC — it grows as the observer's own units advance, so
+    // enemies caught by an advancing sensor get revealed on the spot.
+    const replayViewMode = useStore.getState().viewMode
+    const observerSide: 'blue' | 'red' | null =
+      replayViewMode === 'blue' || replayViewMode === 'red' ? replayViewMode : null
+
+    // Live position of every unit, updated as moves animate. Starts at
+    // baseState (pre-resolve).
+    const livePos = new Map<string, { col: number; row: number }>()
+    for (const u of baseState.units) livePos.set(u.id, { col: u.col, row: u.row })
+
+    let liveCoverage: Set<string> = new Set<string>()
+    const rebuildCoverage = () => {
+      liveCoverage = new Set<string>()
+      if (!observerSide) return
+      const sources: Array<{ col: number; row: number; sensor: number }> = []
+      for (const u of baseState.units) {
+        if (u.side !== observerSide) continue
+        const p = livePos.get(u.id)!
+        sources.push({ col: p.col, row: p.row, sensor: u.sensor })
+      }
+      for (const b of (baseState.bases ?? [])) {
+        if (b.side === observerSide) {
+          sources.push({ col: b.col, row: b.row, sensor: b.sensor })
+        }
+      }
+      for (const src of sources) {
+        for (const cell of baseState.map.cells) {
+          if (hexDistance(src.col, src.row, cell.col, cell.row) <= src.sensor) {
+            liveCoverage.add(`${cell.col},${cell.row}`)
+          }
+        }
+      }
+    }
+    const isVisible = (col: number, row: number) =>
+      !observerSide || liveCoverage.has(`${col},${row}`)
+
+    // Track which enemy entities have been revealed (made visible to
+    // the observer) so we don't re-flash them on each coverage update.
+    const revealed = new Set<string>()
+    const revealEnemiesInCoverage = async () => {
+      if (!observerSide) return
+      const newly: Array<{ id: string; col: number; row: number }> = []
+      for (const u of baseState.units) {
+        if (u.side === observerSide) continue
+        const p = livePos.get(u.id)!
+        if (!liveCoverage.has(`${p.col},${p.row}`)) continue
+        if (revealed.has(u.id)) continue
+        revealed.add(u.id)
+        const node = unitNodes.get(u.id)
+        if (node) {
+          const c = cellCenters.get(`${p.col},${p.row}`)
+          if (c) { node.container.x = c.x; node.container.y = c.y }
+          node.container.visible = true
+          node.container.alpha = 0
+          newly.push({ id: u.id, col: p.col, row: p.row })
+        }
+      }
+      for (const b of (baseState.bases ?? [])) {
+        if (b.side === observerSide) continue
+        if (!liveCoverage.has(`${b.col},${b.row}`)) continue
+        if (revealed.has(b.id)) continue
+        revealed.add(b.id)
+        const node = baseNodes.get(b.id)
+        if (node) {
+          node.container.visible = true
+          node.container.alpha = 0
+          newly.push({ id: b.id, col: b.col, row: b.row })
+        }
+      }
+      // Light fade-in so the player notices a discovery without it
+      // feeling abrupt.
+      if (newly.length > 0) {
+        const targets = newly
+          .map((n) => unitNodes.get(n.id)?.container ?? baseNodes.get(n.id)?.container)
+          .filter((c): c is Container => !!c)
+        await Promise.all(targets.map((c) => tween(c, { alpha: 1 }, 250, easeOutCubic)))
+      }
+    }
+
+    rebuildCoverage()
+    // Don't await initial reveal — the initial fog already handled what
+    // was visible pre-replay; this catches anything we missed.
+    revealEnemiesInCoverage().catch(() => {})
+
     for (const ev of events) {
       switch (ev.type) {
         case 'move': {
@@ -335,14 +438,44 @@ async function buildPixi(
           if (!node) break
           const u = unitsById.get(ev.unit)
           if (!u) break
+          const isEnemy = observerSide !== null && u.side !== observerSide
+          const last = ev.path[ev.path.length - 1]
+          // Fog: if the mover is enemy from observer's POV and NO step
+          // is sensed, snap silently to the destination (no arrow, no
+          // animation) — observer never saw it move.
+          const stepVisible = ev.path.map((h: [number, number]) => isVisible(h[0], h[1]))
+          if (isEnemy && !stepVisible.some((v: boolean) => v)) {
+            const c = cellCenters.get(`${last[0]},${last[1]}`)
+            if (c) { node.container.x = c.x; node.container.y = c.y }
+            livePos.set(ev.unit, { col: last[0], row: last[1] })
+            break
+          }
           const path = ev.path.map((h: [number, number]) => {
             const c = cellCenters.get(`${h[0]},${h[1]}`)
             return c ? { x: c.x, y: c.y } : { x: node.container.x, y: node.container.y }
           })
+          // One animateMovePath call per move, regardless of side. For
+          // friendly moves we use the per-step callback to refresh
+          // coverage and reveal newly-sensed enemies between waypoints
+          // — keeps the "sneak peek" feel without inflating the move
+          // duration with N cleanup-fade envelopes.
           await animateMovePath(
             node.container, path, moveMsPerHex(u), false,
-            fxLayer, SIDE_COLOR[u.side],
+            isEnemy ? undefined : fxLayer,
+            isEnemy ? undefined : SIDE_COLOR[u.side],
+            isEnemy
+              ? undefined
+              : async (i: number) => {
+                  livePos.set(ev.unit, { col: ev.path[i][0], row: ev.path[i][1] })
+                  rebuildCoverage()
+                  await revealEnemiesInCoverage()
+                },
           )
+          livePos.set(ev.unit, { col: last[0], row: last[1] })
+          if (isEnemy) {
+            // Enemy might have walked INTO our coverage — re-check.
+            await revealEnemiesInCoverage()
+          }
           break
         }
         case 'strike': {
@@ -352,12 +485,22 @@ async function buildPixi(
           if (!atkNode) break
           const tgtCenter = cellCenters.get(`${ev.target_hex[0]},${ev.target_hex[1]}`)
           if (!tgtCenter) break
-          await animateStrike(
-            fxLayer,
-            { x: atkNode.container.x, y: atkNode.container.y },
-            { x: tgtCenter.x, y: tgtCenter.y },
-            { hit: !ev.whiffed, pkill: 1.0, damage: ev.damage },
-          )
+          // Fog: skip the tracer line if neither attacker hex nor target
+          // hex is sensed. We still apply HP changes (engine truth) — but
+          // the observer doesn't see the engagement happen.
+          const atkUnit = unitsById.get(ev.attacker)
+          const atkVisible = atkUnit ? isVisible(atkUnit.col, atkUnit.row) : true
+          const tgtVisible = isVisible(ev.target_hex[0], ev.target_hex[1])
+          const ownAttacker = !!atkUnit && (!observerSide || atkUnit.side === observerSide)
+          const showTracer = ownAttacker || atkVisible || tgtVisible
+          if (showTracer) {
+            await animateStrike(
+              fxLayer,
+              { x: atkNode.container.x, y: atkNode.container.y },
+              { x: tgtCenter.x, y: tgtCenter.y },
+              { hit: !ev.whiffed, pkill: 1.0, damage: ev.damage },
+            )
+          }
           if (!ev.whiffed) {
             for (const tid of ev.targets_hit) {
               const node = nodeFor(tid)
@@ -365,7 +508,7 @@ async function buildPixi(
               if (node && tgt) {
                 tgt.hp = Math.max(0, tgt.hp - ev.damage)
                 refreshHpBar(node, tgt.hp, tgt.max_hp, tgt.side)
-                await flashAndShake(node.container)
+                if (showTracer) await flashAndShake(node.container)
               }
             }
           }
@@ -375,7 +518,7 @@ async function buildPixi(
             if (atk) {
               atk.hp = Math.max(0, atk.hp - ev.counter_damage)
               refreshHpBar(atkNode, atk.hp, atk.max_hp, atk.side)
-              await flashAndShake(atkNode.container)
+              if (showTracer) await flashAndShake(atkNode.container)
             }
           }
           break
@@ -799,8 +942,18 @@ function commitTargetingClick(
     case 'MOVE': {
       if (unit.speed <= 0) return rejectClick('stationary platform', hex, game)
       if (hex.col === unit.col && hex.row === unit.row) return false
-      if (hexDistance(unit.col, unit.row, hex.col, hex.row) > unit.speed)
-        return rejectClick('out of move range', hex, game)
+      const dist = hexDistance(unit.col, unit.row, hex.col, hex.row)
+      if (dist > unit.speed) {
+        console.warn(
+          '[move-reject] out of move range',
+          { id: unit.id, side: unit.side, type: unit.type,
+            unitPos: [unit.col, unit.row], target: [hex.col, hex.row],
+            dist, speed: unit.speed },
+        )
+        return rejectClick(
+          `out of move range (${dist} > ${unit.speed})`, hex, game,
+        )
+      }
       // Terrain check: ground can't enter water; sea can't enter land.
       // Mountain is passable for ground but eats the whole move budget
       // (one mountain step ends the turn) — so it's only a valid target
@@ -880,7 +1033,20 @@ export function MapStage() {
   const setOrder = useStore((s) => s.setOrder)
   const cancelTargeting = useStore((s) => s.cancelTargeting)
 
-  // mount once when game first loads
+  // Mount-only teardown. Runs once per MapStage instance — destroys
+  // Pixi when the component truly unmounts (e.g. region swap remounts
+  // via key=assetVersion). This is split from the build effect so
+  // game-state mutations don't tear Pixi down.
+  useEffect(() => {
+    return () => {
+      handlesRef.current?.destroy()
+      handlesRef.current = null
+    }
+  }, [])
+
+  // Build Pixi the first time `game` is available. Bails on subsequent
+  // game changes (handlesRef.current is already set) — those are
+  // reconciled by the redraw effect, not by rebuilding the app.
   useEffect(() => {
     if (!game || !ref.current || handlesRef.current) return
     let cancelled = false
@@ -897,10 +1063,8 @@ export function MapStage() {
             if (!own) {
               cancelTargeting()
             } else if (hex && commitTargetingClick(t, own, hex, unit, st.game)) {
-              // setOrder already happened inside commitTargetingClick
               return
             } else {
-              // invalid click in targeting mode: keep mode active, no-op.
               return
             }
             return
@@ -919,11 +1083,11 @@ export function MapStage() {
       }
       handlesRef.current = h
     })()
-    return () => {
-      cancelled = true
-      handlesRef.current?.destroy()
-      handlesRef.current = null
-    }
+    // The cleanup here only cancels an in-flight async build (if `game`
+    // changes mid-build, we don't want a stale Pixi to land in
+    // handlesRef). It does NOT destroy a built Pixi — the mount-only
+    // effect above owns that.
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game])
 
