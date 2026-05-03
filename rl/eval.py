@@ -11,9 +11,11 @@ from stable_baselines3 import PPO
 
 try:
     from rl.baseline import predict_baseline_action
+    from rl.policy import RewardConditionedExtractor as _RewardConditionedExtractor
     from rl.rl_env import OverwatchEnv
 except ModuleNotFoundError:  # Allows `python rl/eval.py` from repo root.
     from baseline import predict_baseline_action
+    from policy import RewardConditionedExtractor as _RewardConditionedExtractor
     from rl_env import OverwatchEnv
 
 
@@ -38,11 +40,28 @@ POLICY_NAMES = {
 }
 
 UNIT_ORDER = ("recon", "strike", "sam")
+BEST_MODEL = "rl/overwatch_conditioned_bc_scale3_time_balanced"
+MODEL_PRESETS = {
+    "overwatch_agent": (1.0, False, False),
+    "overwatch_bc_100k": (1.0, False, False),
+    "overwatch_bc_200k": (1.0, False, False),
+    "overwatch_bc_scale10_100k": (10.0, False, False),
+    "overwatch_bc_scale10_teacher_100k": (10.0, False, False),
+    "overwatch_conditioned_bc_scale3_30e": (3.0, False, False),
+    "overwatch_conditioned_bc_scale3_time_balanced": (3.0, True, False),
+    "overwatch_conditioned_bc_scale3_time_recon": (3.0, True, False),
+    "overwatch_conditioned_bc_scale3_time_balanced_radar2": (3.0, True, False),
+    "overwatch_conditioned_bc_scale3_phase_recon": (3.0, True, True),
+}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="rl/overwatch_agent")
+    parser.add_argument(
+        "--model",
+        default=BEST_MODEL,
+        help="Path to a PPO checkpoint. Defaults to the best learned toy policy.",
+    )
     parser.add_argument(
         "--policy",
         choices=["ppo", "baseline"],
@@ -52,7 +71,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--steps", type=int, default=75)
     parser.add_argument("--sleep", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=11)
-    parser.add_argument("--weight-obs-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--weight-obs-scale",
+        type=float,
+        default=None,
+        help="Observation scale for reward weights. If omitted, known model presets are used.",
+    )
+    parser.add_argument(
+        "--include-time-feature",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Append normalized episode time before the four reward weights.",
+    )
+    parser.add_argument(
+        "--include-time-phase",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Append one-hot t mod 3 before the four reward weights.",
+    )
     parser.add_argument(
         "--regime",
         choices=["all", *REGIMES.keys()],
@@ -64,7 +100,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Sample from the policy instead of using deterministic actions.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    apply_model_preset(args)
+    return args
+
+
+def apply_model_preset(args: argparse.Namespace) -> None:
+    stem = Path(args.model).stem
+    scale, include_time_feature, include_time_phase = MODEL_PRESETS.get(
+        stem,
+        (1.0, False, False),
+    )
+    if args.weight_obs_scale is None:
+        args.weight_obs_scale = scale
+    if args.include_time_feature is None:
+        args.include_time_feature = include_time_feature
+    if args.include_time_phase is None:
+        args.include_time_phase = include_time_phase
 
 
 def decode_action(action: np.ndarray | list[int]) -> dict[str, str]:
@@ -133,6 +185,8 @@ def main() -> None:
         env = OverwatchEnv(
             max_steps=args.steps,
             weight_obs_scale=args.weight_obs_scale,
+            include_time_feature=args.include_time_feature,
+            include_time_phase=args.include_time_phase,
         )
         env.set_reward_weights(weights)
         obs, info = env.reset(seed=args.seed)

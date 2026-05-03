@@ -16,10 +16,12 @@ from stable_baselines3 import PPO
 try:
     from rl.baseline import predict_baseline_action
     from rl.eval import REGIMES, decode_action
+    from rl.policy import RewardConditionedExtractor as _RewardConditionedExtractor
     from rl.rl_env import OverwatchEnv
 except ModuleNotFoundError:  # Allows `python rl/diagnose_conditioning.py`.
     from baseline import predict_baseline_action
     from eval import REGIMES, decode_action
+    from policy import RewardConditionedExtractor as _RewardConditionedExtractor
     from rl_env import OverwatchEnv
 
 
@@ -46,6 +48,16 @@ def parse_args() -> argparse.Namespace:
         help="Policy used to collect fixed battlefield states.",
     )
     parser.add_argument("--weight-obs-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--include-time-feature",
+        action="store_true",
+        help="Append normalized episode time before the four reward weights.",
+    )
+    parser.add_argument(
+        "--include-time-phase",
+        action="store_true",
+        help="Append one-hot t mod 3 before the four reward weights.",
+    )
     return parser.parse_args()
 
 
@@ -55,6 +67,8 @@ def collect_states(args: argparse.Namespace, model: PPO) -> list[np.ndarray]:
         env = OverwatchEnv(
             max_steps=args.steps_per_seed,
             weight_obs_scale=args.weight_obs_scale,
+            include_time_feature=args.include_time_feature,
+            include_time_phase=args.include_time_phase,
         )
         # Use neutral-ish weights while collecting states; the diagnostic swaps
         # the tail afterward.
@@ -142,8 +156,17 @@ def compare_regimes(model: PPO, states: list[np.ndarray], scale: float) -> list[
     return comparisons
 
 
-def print_initial_state_probe(model: PPO, scale: float) -> None:
-    env = OverwatchEnv(weight_obs_scale=scale)
+def print_initial_state_probe(
+    model: PPO,
+    scale: float,
+    include_time_feature: bool,
+    include_time_phase: bool,
+) -> None:
+    env = OverwatchEnv(
+        weight_obs_scale=scale,
+        include_time_feature=include_time_feature,
+        include_time_phase=include_time_phase,
+    )
     obs, _info = env.reset(seed=0)
     print("single_initial_state_probe:")
     for name, weights in REGIMES.items():
@@ -164,7 +187,14 @@ def main() -> None:
     args = parse_args()
     model = PPO.load(args.model)
     print(f"weight_obs_scale={args.weight_obs_scale}")
-    print_initial_state_probe(model, args.weight_obs_scale)
+    print(f"include_time_feature={args.include_time_feature}")
+    print(f"include_time_phase={args.include_time_phase}")
+    print_initial_state_probe(
+        model,
+        args.weight_obs_scale,
+        args.include_time_feature,
+        args.include_time_phase,
+    )
     states = collect_states(args, model)
     print(f"\ncollected_states={len(states)} collector={args.collector}")
     for comparison in compare_regimes(model, states, args.weight_obs_scale):

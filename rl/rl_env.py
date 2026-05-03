@@ -93,6 +93,8 @@ class OverwatchEnv(gym.Env):
         max_steps: int = 75,
         render_mode: str | None = None,
         weight_obs_scale: float = 1.0,
+        include_time_feature: bool = False,
+        include_time_phase: bool = False,
     ) -> None:
         super().__init__()
         if grid_size < 8:
@@ -104,12 +106,18 @@ class OverwatchEnv(gym.Env):
         self.max_steps = max_steps
         self.render_mode = render_mode
         self.weight_obs_scale = float(weight_obs_scale)
+        self.include_time_feature = include_time_feature
+        self.include_time_phase = include_time_phase
 
         self.action_space = spaces.MultiDiscrete([5, 3, 5, 3, 5, 3, 2])
         self.grid_channels = 6
-        self.obs_size = self.grid_channels * self.height * self.width + 4
+        self.time_feature_count = int(self.include_time_feature) + (3 if self.include_time_phase else 0)
+        self.obs_size = self.grid_channels * self.height * self.width + self.time_feature_count + 4
         obs_low = np.full((self.obs_size,), -1.0, dtype=np.float32)
         obs_high = np.full((self.obs_size,), 1.0, dtype=np.float32)
+        if self.time_feature_count:
+            obs_low[-4 - self.time_feature_count:-4] = 0.0
+            obs_high[-4 - self.time_feature_count:-4] = 1.0
         obs_low[-4:] = np.array(
             [-1.0, -1.0, 0.0, -1.0],
             dtype=np.float32,
@@ -584,7 +592,17 @@ class OverwatchEnv(gym.Env):
             [self.w_enemy, self.w_own, self.w_info, self.w_time],
             dtype=np.float32,
         ) * self.weight_obs_scale
-        return np.concatenate([grid.ravel(), weights]).astype(np.float32)
+        parts = [grid.ravel()]
+        if self.include_time_feature:
+            parts.append(
+                np.array([self.t / max(float(self.max_steps), 1.0)], dtype=np.float32)
+            )
+        if self.include_time_phase:
+            phase = np.zeros(3, dtype=np.float32)
+            phase[self.t % 3] = 1.0
+            parts.append(phase)
+        parts.append(weights)
+        return np.concatenate(parts).astype(np.float32)
 
     def _info(self) -> dict[str, Any]:
         return {
