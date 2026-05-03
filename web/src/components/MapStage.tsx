@@ -197,7 +197,13 @@ async function buildPixi(
       onPointerDown(null, null)
       return
     }
-    const u = state.units.find((u) => u.col === hex.col && u.row === hex.row)
+    // Read the LIVE game state, not the captured initialGame. Otherwise
+    // clicks always hit unit positions from the moment Pixi was built —
+    // so after a unit moves or dies, clicks on the new position miss it
+    // and clicks on the old position still find a stale unit.
+    const liveGame = useStore.getState().game
+    const units = liveGame ? liveGame.units : state.units
+    const u = units.find((u) => u.col === hex.col && u.row === hex.row)
     onPointerDown(hex, u ?? null)
   })
 
@@ -328,6 +334,36 @@ async function buildPixi(
     const basesById = new Map((baseState.bases ?? []).map((b) => [b.id, b]))
     const nodeFor = (id: string) => unitNodes.get(id) ?? baseNodes.get(id)
 
+    // Visibility filter for replay: in side-views, hide enemy actions
+    // whose origin/path/target the observer can't sense. We compute the
+    // observer's PRE-RESOLVE sensor coverage (using baseState) once;
+    // good enough for v1 — accurate fog would re-derive coverage per
+    // step, which is overkill.
+    const replayViewMode = useStore.getState().viewMode
+    const observerSide: 'blue' | 'red' | null =
+      replayViewMode === 'blue' || replayViewMode === 'red' ? replayViewMode : null
+    const observerVisible: Set<string> = (() => {
+      if (!observerSide) return new Set<string>()
+      const s = new Set<string>()
+      const sources: Array<{ col: number; row: number; sensor: number }> = []
+      for (const u of baseState.units) {
+        if (u.side === observerSide) sources.push({ col: u.col, row: u.row, sensor: u.sensor })
+      }
+      for (const b of (baseState.bases ?? [])) {
+        if (b.side === observerSide) sources.push({ col: b.col, row: b.row, sensor: b.sensor })
+      }
+      for (const src of sources) {
+        for (const cell of baseState.map.cells) {
+          if (hexDistance(src.col, src.row, cell.col, cell.row) <= src.sensor) {
+            s.add(`${cell.col},${cell.row}`)
+          }
+        }
+      }
+      return s
+    })()
+    const isVisible = (col: number, row: number) =>
+      !observerSide || observerVisible.has(`${col},${row}`)
+
     for (const ev of events) {
       switch (ev.type) {
         case 'move': {
@@ -335,13 +371,29 @@ async function buildPixi(
           if (!node) break
           const u = unitsById.get(ev.unit)
           if (!u) break
+          // Fog: if the mover is enemy from observer's POV, only animate
+          // the portion of the path that's actually sensed. If NO step
+          // is sensed, snap silently to the destination (no arrow, no
+          // animation) — observer never saw it move.
+          const isEnemy = observerSide !== null && u.side !== observerSide
+          const stepVisible = ev.path.map((h: [number, number]) => isVisible(h[0], h[1]))
+          if (isEnemy && !stepVisible.some((v: boolean) => v)) {
+            // Silent off-screen move.
+            const last = ev.path[ev.path.length - 1]
+            const c = cellCenters.get(`${last[0]},${last[1]}`)
+            if (c) { node.container.x = c.x; node.container.y = c.y }
+            break
+          }
           const path = ev.path.map((h: [number, number]) => {
             const c = cellCenters.get(`${h[0]},${h[1]}`)
             return c ? { x: c.x, y: c.y } : { x: node.container.x, y: node.container.y }
           })
           await animateMovePath(
             node.container, path, moveMsPerHex(u), false,
-            fxLayer, SIDE_COLOR[u.side],
+            // Pass undefined for the side colour when the mover is enemy
+            // and we shouldn't draw the dashed track / arrowhead trail.
+            isEnemy ? undefined : fxLayer,
+            isEnemy ? undefined : SIDE_COLOR[u.side],
           )
           break
         }
@@ -352,12 +404,22 @@ async function buildPixi(
           if (!atkNode) break
           const tgtCenter = cellCenters.get(`${ev.target_hex[0]},${ev.target_hex[1]}`)
           if (!tgtCenter) break
-          await animateStrike(
-            fxLayer,
-            { x: atkNode.container.x, y: atkNode.container.y },
-            { x: tgtCenter.x, y: tgtCenter.y },
-            { hit: !ev.whiffed, pkill: 1.0, damage: ev.damage },
-          )
+          // Fog: skip the tracer line if neither attacker hex nor target
+          // hex is sensed. We still apply HP changes (engine truth) — but
+          // the observer doesn't see the engagement happen.
+          const atkUnit = unitsById.get(ev.attacker)
+          const atkVisible = atkUnit ? isVisible(atkUnit.col, atkUnit.row) : true
+          const tgtVisible = isVisible(ev.target_hex[0], ev.target_hex[1])
+          const ownAttacker = !!atkUnit && (!observerSide || atkUnit.side === observerSide)
+          const showTracer = ownAttacker || atkVisible || tgtVisible
+          if (showTracer) {
+            await animateStrike(
+              fxLayer,
+              { x: atkNode.container.x, y: atkNode.container.y },
+              { x: tgtCenter.x, y: tgtCenter.y },
+              { hit: !ev.whiffed, pkill: 1.0, damage: ev.damage },
+            )
+          }
           if (!ev.whiffed) {
             for (const tid of ev.targets_hit) {
               const node = nodeFor(tid)
@@ -365,7 +427,7 @@ async function buildPixi(
               if (node && tgt) {
                 tgt.hp = Math.max(0, tgt.hp - ev.damage)
                 refreshHpBar(node, tgt.hp, tgt.max_hp, tgt.side)
-                await flashAndShake(node.container)
+                if (showTracer) await flashAndShake(node.container)
               }
             }
           }
@@ -375,7 +437,7 @@ async function buildPixi(
             if (atk) {
               atk.hp = Math.max(0, atk.hp - ev.counter_damage)
               refreshHpBar(atkNode, atk.hp, atk.max_hp, atk.side)
-              await flashAndShake(atkNode.container)
+              if (showTracer) await flashAndShake(atkNode.container)
             }
           }
           break
