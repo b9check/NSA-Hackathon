@@ -5,7 +5,27 @@ import heapq
 
 from engine.hex import Hex, in_bounds, neighbors
 from engine.state import GameState, UnitInstance
-from engine.terrain import INF, Terrain, can_traverse, move_cost
+from engine.terrain import INF, Terrain, MOVE_COST
+
+
+def _can_traverse(unit: UnitInstance, terrain: Terrain) -> bool:
+    return _step_cost(unit, terrain) < INF
+
+
+def _step_cost(unit: UnitInstance, terrain: Terrain) -> int:
+    """Per-unit, per-terrain step cost.
+
+    Mountains are special: ground units (land + amphib) CAN enter, but a
+    single mountain hex consumes their entire move budget for the turn.
+    Modeled by making mountain step cost = max(1, unit.speed). So:
+      - tank (speed 3): one mountain step (cost 3) and no more.
+      - infantry (speed 2): one mountain step (cost 2) and no more.
+      - missile_launcher (speed 0): can't move anyway.
+    Sea / air units retain whatever the static MOVE_COST table says.
+    """
+    if terrain == Terrain.MOUNTAIN and unit.domain == "land":
+        return max(1, unit.speed)
+    return MOVE_COST.get((unit.domain, terrain), INF)
 
 
 def _terrain_grid(state: GameState) -> dict[tuple[int, int], Terrain]:
@@ -46,9 +66,9 @@ def reachable(state: GameState, unit: UnitInstance) -> dict[tuple[int, int], int
             if (nb.col, nb.row) in blocked:
                 continue
             terr = grid[(nb.col, nb.row)]
-            if not can_traverse(unit.domain, terr):
+            if not _can_traverse(unit, terr):
                 continue
-            step = move_cost(unit.domain, terr)
+            step = _step_cost(unit, terr)
             new_cost = cost + step
             if new_cost > unit.speed:
                 continue
@@ -95,9 +115,9 @@ def path_to(
             if (nb.col, nb.row) in blocked:
                 continue
             terr = grid[(nb.col, nb.row)]
-            if not can_traverse(unit.domain, terr):
+            if not _can_traverse(unit, terr):
                 continue
-            step = move_cost(unit.domain, terr)
+            step = _step_cost(unit, terr)
             new_cost = cost + step
             if new_cost > unit.speed:
                 continue

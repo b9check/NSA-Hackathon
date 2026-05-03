@@ -72,12 +72,18 @@ function useGlobalShortcuts() {
       const playerSide: 'blue' | 'red' = st.viewMode === 'red' ? 'red' : 'blue'
       if (u.side !== playerSide) return
 
+      // Gate each shortcut on the unit's capability so e.g. pressing S
+      // on a weaponless scout drone doesn't enter STRIKE targeting (it
+      // would just silently fail later when no hex is valid).
+      const canMove   = u.speed > 0
+      const canStrike = u.weapon > 0
+      const canScout  = u.type === 'scout_drone'
+
       const k = e.key.toLowerCase()
-      if (k === 'm') st.startTargeting(u.id, 'MOVE')
-      else if (k === 's') st.startTargeting(u.id, 'STRIKE')
-      else if (k === 'v') st.startTargeting(u.id, 'SCOUT')
-      else if (k === 'c') st.startTargeting(u.id, 'CAPTURE')
-      else if (k === 'o') st.setOrder({ kind: 'OVERWATCH', unit_id: u.id })
+      if (k === 'm' && canMove) st.startTargeting(u.id, 'MOVE')
+      else if (k === 's' && canStrike) st.startTargeting(u.id, 'STRIKE')
+      else if (k === 'v' && canScout) st.setOrder({ kind: 'SCOUT', unit_id: u.id })
+      else if (k === 'o' && canStrike) st.setOrder({ kind: 'OVERWATCH', unit_id: u.id })
       else if (k === 'h') st.setOrder({ kind: 'HOLD', unit_id: u.id })
       else if (k === 'x') st.clearOrder(u.id)
     }

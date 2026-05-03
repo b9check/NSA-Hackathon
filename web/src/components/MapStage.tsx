@@ -474,7 +474,8 @@ function drawReachability(
   centers: Map<string, { x: number; y: number; cell: HexCell }>,
 ) {
   // Quick BFS approximation: hexes within `speed` step distance whose terrain is traversable.
-  // Mirrors engine/movement.py at low fidelity (no per-step costs); good enough for visual hint.
+  // Mirrors engine/movement.py: mountain is passable for ground but eats
+  // the full move budget (one mountain step ends the turn).
   const cost = (dom: string, t: string) => {
     if (dom === 'air') return 1
     if (dom === 'sea') return t === 'water' ? 1 : Infinity
@@ -484,7 +485,7 @@ function drawReachability(
     }
     // land
     if (t === 'water') return Infinity
-    if (t === 'mountain') return 3
+    if (t === 'mountain') return Math.max(1, unit.speed) // one step then stop
     if (t === 'urban' || t === 'forest') return 2
     return 1
   }
@@ -801,14 +802,18 @@ function commitTargetingClick(
       if (hexDistance(unit.col, unit.row, hex.col, hex.row) > unit.speed)
         return rejectClick('out of move range', hex, game)
       // Terrain check: ground can't enter water; sea can't enter land.
+      // Mountain is passable for ground but eats the whole move budget
+      // (one mountain step ends the turn) — so it's only a valid target
+      // if it's adjacent to the unit.
       const cell = game.map.cells.find((c) => c.col === hex.col && c.row === hex.row)
       if (cell) {
         if (unit.domain === 'land' && cell.terrain === 'water')
           return rejectClick('ground unit can\'t enter water', hex, game)
         if (unit.domain === 'sea' && cell.terrain !== 'water')
           return rejectClick('ship can only travel on water', hex, game)
-        if (unit.domain === 'land' && cell.terrain === 'mountain')
-          return rejectClick('mountain blocks ground unit', hex, game)
+        if (unit.domain === 'land' && cell.terrain === 'mountain' &&
+            hexDistance(unit.col, unit.row, hex.col, hex.row) > 1)
+          return rejectClick('mountain step ends the turn — must be adjacent', hex, game)
       }
       // Refuse to step ONTO an enemy hex.
       const enemyOnHex = game.units.some(
