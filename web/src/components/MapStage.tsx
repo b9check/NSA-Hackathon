@@ -939,14 +939,20 @@ export function MapStage() {
   // Replay any events queued by /api/resolve.
   const pendingEvents = useStore((s) => s.pendingEvents)
   useEffect(() => {
+    console.log('[hotseat] pendingEvents effect, len:', pendingEvents?.length, 'has handles:', !!handlesRef.current, 'has game:', !!game)
     if (!pendingEvents || !handlesRef.current || !game) return
     let cancelled = false
     ;(async () => {
       useStore.getState().setReplaying(true)
+      console.log('[hotseat] playEvents starting, events:', pendingEvents.length)
       try {
         await handlesRef.current!.playEvents(pendingEvents, game)
+        console.log('[hotseat] playEvents finished')
       } finally {
-        if (cancelled) return
+        if (cancelled) {
+          console.log('[hotseat] playEvents cancelled, skipping onReplayComplete')
+          return
+        }
         // The store decides what comes next: in hot-seat mode it
         // orchestrates a 2nd POV pass; otherwise it refetches and
         // settles. This keeps replay-completion logic in one place.
