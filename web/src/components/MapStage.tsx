@@ -130,13 +130,12 @@ async function buildPixi(
   app.stage.addChild(root)
 
   const gridLayer = new Container()
-  const fogLayer = new Container() // dims non-visible hexes in side views
-  const overlayLayer = new Container() // objective ring, reachability, ranges
+  const overlayLayer = new Container() // reachability, ranges
   const orderLayer = new Container() // queued-order arrows / reticles
   const hoverLayer = new Container()
   const unitLayer = new Container()
   const fxLayer = new Container() // tracers, particles, popups
-  root.addChild(gridLayer, fogLayer, overlayLayer, orderLayer, hoverLayer, unitLayer, fxLayer)
+  root.addChild(gridLayer, overlayLayer, orderLayer, hoverLayer, unitLayer, fxLayer)
 
   // Pre-compute hex centers
   const cellCenters = new Map<string, { x: number; y: number; cell: HexCell }>()
@@ -146,9 +145,11 @@ async function buildPixi(
   }
 
   // ---- Last-known-position memory (per observer side) ----
-  // Each side remembers where it last *saw* enemy units / bases. Entries
-  // older than LKP_DECAY turns are purged. Only consulted in side views.
-  const LKP_DECAY = 3
+  // Each side remembers where it last *saw* enemy units / bases. The
+  // ghost survives as long as the unit hasn't moved from where we left
+  // it; the moment the engine's truth puts the unit on a different hex
+  // from the ghost, we invalidate (we'd realize on next look that they
+  // aren't there anymore — but we don't know where they went).
   type Lkp = { col: number; row: number; turn: number; isBase: boolean; type: string }
   const lastSeen: Record<'blue' | 'red', Map<string, Lkp>> = {
     blue: new Map(),
@@ -207,11 +208,9 @@ async function buildPixi(
     onPointerDown(hex, u ?? null)
   })
 
-  // ---- Selection / overlays / fog / orders ----
+  // ---- Selection / overlays / orders ----
   const overlay = new Graphics()
   overlayLayer.addChild(overlay)
-  const fogGfx = new Graphics()
-  fogLayer.addChild(fogGfx)
   const orderGfx = new Graphics()
   orderLayer.addChild(orderGfx)
   const selectionGfx = new Graphics()
@@ -236,7 +235,6 @@ async function buildPixi(
     viewMode: ViewMode,
   ) {
     overlay.clear()
-    fogGfx.clear()
     orderGfx.clear()
     selectionGfx.clear()
 
@@ -247,17 +245,10 @@ async function buildPixi(
     const visibleHexes = computeVisibleHexes(s, viewMode)
     const sideView = viewMode !== 'omniscient'
 
-    // ---- Fog ----
-    if (sideView) {
-      for (const cell of s.map.cells) {
-        const key = `${cell.col},${cell.row}`
-        if (visibleHexes.has(key)) continue
-        const c = cellCenters.get(key)!
-        fogGfx
-          .poly(hexCorners(c.x, c.y, HEX_SIZE * 1.04))
-          .fill({ color: 0x05080F, alpha: 0.78 })
-      }
-    }
+    // No fog overlay on the terrain — both sides see the satellite map
+    // and base positions at all times. Visibility only gates which
+    // ENEMY UNITS get rendered (handled by the syncUnits filter below
+    // and the ghost overlays).
 
     if (selected) {
       drawReachability(overlay, s, selected, cellCenters)
@@ -288,13 +279,21 @@ async function buildPixi(
           })
         }
       }
-      // Purge stale or no-longer-extant entries.
+      // Invalidate ghosts whose unit isn't where we last saw it. Engine
+      // truth: if the entity has moved off the LKP hex (or is gone), we
+      // would notice "they're not there anymore" — so the ghost dies.
+      // If they didn't move, the ghost stays at its hex.
       for (const [id, lkp] of myMap) {
-        const stillExists =
-          lkp.isBase
-            ? (s.bases ?? []).some((x) => x.id === id)
-            : s.units.some((x) => x.id === id)
-        if (!stillExists || s.turn - lkp.turn > LKP_DECAY) myMap.delete(id)
+        const cur = lkp.isBase
+          ? (s.bases ?? []).find((b) => b.id === id)
+          : s.units.find((u) => u.id === id)
+        if (!cur) {
+          myMap.delete(id)
+          continue
+        }
+        if (cur.col !== lkp.col || cur.row !== lkp.row) {
+          myMap.delete(id)
+        }
       }
       // Draw ghosts for entries that aren't currently visible.
       drawLastKnownGhosts(overlay, s, viewMode, visibleHexes, myMap, cellCenters)
