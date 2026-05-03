@@ -282,6 +282,12 @@ export const useStore = create<AppState>((set, get) => ({
         targeting: null,
         gameOver: null,
         hotseatReplay: null,
+        // Wipe per-game AI state too: the prior game's reasoning belongs
+        // to a different match. Lessons store on disk is preserved.
+        aiReasoning: { blue: null, red: null },
+        aiThinking: { blue: false, red: false },
+        lastLessons: [],
+        showLessonsDrawer: false,
       })
       await get().refetchState()
     } catch (e: any) {
@@ -307,6 +313,10 @@ export const useStore = create<AppState>((set, get) => ({
         targeting: null,
         gameOver: null,
         hotseatReplay: null,
+        aiReasoning: { blue: null, red: null },
+        aiThinking: { blue: false, red: false },
+        lastLessons: [],
+        showLessonsDrawer: false,
       })
       await get().refetchState()
     } catch (e: any) {
@@ -624,6 +634,10 @@ export const useStore = create<AppState>((set, get) => ({
       targeting: null,
       selectedUnitId: null,
       hotseatReplay: null,
+      aiReasoning: { blue: null, red: null },
+      aiThinking: { blue: false, red: false },
+      lastLessons: [],
+      showLessonsDrawer: false,
     })
   },
 
