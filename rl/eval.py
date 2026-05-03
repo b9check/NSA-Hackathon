@@ -10,8 +10,10 @@ import numpy as np
 from stable_baselines3 import PPO
 
 try:
+    from rl.baseline import predict_baseline_action
     from rl.rl_env import OverwatchEnv
 except ModuleNotFoundError:  # Allows `python rl/eval.py` from repo root.
+    from baseline import predict_baseline_action
     from rl_env import OverwatchEnv
 
 
@@ -41,6 +43,12 @@ UNIT_ORDER = ("recon", "strike", "sam")
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="rl/overwatch_agent")
+    parser.add_argument(
+        "--policy",
+        choices=["ppo", "baseline"],
+        default="ppo",
+        help="Evaluate the trained PPO policy or the scripted intent baseline.",
+    )
     parser.add_argument("--steps", type=int, default=75)
     parser.add_argument("--sleep", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=11)
@@ -110,15 +118,17 @@ def selected_regimes(name: str) -> dict[str, list[float]]:
 
 def main() -> None:
     args = parse_args()
-    model_path = Path(args.model)
-    zip_path = model_path if model_path.suffix == ".zip" else model_path.with_suffix(".zip")
-    if not zip_path.exists():
-        raise FileNotFoundError(f"Missing trained model: {zip_path}")
+    model = None
+    if args.policy == "ppo":
+        model_path = Path(args.model)
+        zip_path = model_path if model_path.suffix == ".zip" else model_path.with_suffix(".zip")
+        if not zip_path.exists():
+            raise FileNotFoundError(f"Missing trained model: {zip_path}")
+        model = PPO.load(str(model_path))
 
-    model = PPO.load(str(model_path))
     for name, weights in selected_regimes(args.regime).items():
         print("=" * 80)
-        print(f"{name.upper()} weights={weights}")
+        print(f"{name.upper()} policy={args.policy} weights={weights}")
         env = OverwatchEnv(max_steps=args.steps)
         env.set_reward_weights(weights)
         obs, info = env.reset(seed=args.seed)
@@ -131,7 +141,11 @@ def main() -> None:
         final_reason = "step_limit"
 
         for step in range(1, args.steps + 1):
-            action, _ = model.predict(obs, deterministic=not args.stochastic)
+            if args.policy == "baseline":
+                action = predict_baseline_action(env)
+            else:
+                assert model is not None
+                action, _ = model.predict(obs, deterministic=not args.stochastic)
             decoded = decode_action(action)
             for unit in UNIT_ORDER:
                 action_counts[f"{unit}:{decoded[unit]}"] += 1

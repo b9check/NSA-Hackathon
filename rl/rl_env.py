@@ -330,16 +330,14 @@ class OverwatchEnv(gym.Env):
     def _decode_blue_action(self, action: np.ndarray) -> tuple[dict[str, int], dict[str, int]]:
         blue_units = [u for u in self.units if u.side == "blue" and u.alive]
         by_kind = {u.kind: u for u in blue_units}
-        ordered_ids = [
-            by_kind[kind].id
-            for kind in ("recon", "strike", "sam")
-            if kind in by_kind
-        ]
         moves: dict[str, int] = {}
         policies: dict[str, int] = {}
-        for idx, unit_id in enumerate(ordered_ids):
-            moves[unit_id] = int(action[idx * 2])
-            policies[unit_id] = int(action[idx * 2 + 1])
+        for idx, kind in enumerate(("recon", "strike", "sam")):
+            unit = by_kind.get(kind)
+            if unit is None:
+                continue
+            moves[unit.id] = int(action[idx * 2])
+            policies[unit.id] = int(action[idx * 2 + 1])
         self.blue_sam_emit = bool(action[6])
         self.last_blue_policies = policies
         return moves, policies
