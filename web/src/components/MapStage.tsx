@@ -21,6 +21,7 @@ import {
 import type { GameState, HexCell, UnitInstance, ViewMode } from '../types'
 import { COLORS, SIDE_COLOR } from '../theme'
 import {
+  refreshHpBar,
   syncBases,
   syncUnits,
   type BaseNode,
@@ -355,14 +356,13 @@ async function buildPixi(
             { hit: ev.hit, pkill: ev.pkill, damage: ev.damage },
           )
           if (ev.hit && tgt) {
-            // Optimistically reflect the new HP on the bar (resolver's truth
-            // syncs on the post-replay refetchState).
+            // Reflect the new HP on the bar immediately so the player
+            // sees the chunk vanish as the missile lands. The post-replay
+            // refetchState() reconciles to the resolver's truth.
             tgt.hp = ev.remaining_hp
-            // Repaint the HP bar via the existing reconciler helper.
             const node = nodeFor(ev.target)
             if (node) {
-              // forcing the lastHp mismatch causes drawHpBar to re-run
-              node.lastHp = -1
+              refreshHpBar(node, ev.remaining_hp, tgt.max_hp, tgt.side)
             }
             // shake the target
             await flashAndShake(tgtNode.container)
@@ -554,6 +554,72 @@ function drawWeaponRing(
 function drawSelectionRing(g: Graphics, cx: number, cy: number) {
   g.poly(hexCorners(cx, cy, HEX_SIZE * 1.0))
     .stroke({ color: COLORS.amber, width: 2, alpha: 0.95 })
+}
+
+
+/** Compute the set of (col,row) keys covered by ANY friendly unit/base
+ *  sensor on `side`. Identical to computeVisibleHexes(side), kept as its
+ *  own helper so the click validators can call it without computing
+ *  full fog state. */
+function computeFriendlySensorCoverage(
+  game: GameState, side: 'blue' | 'red',
+): Set<string> {
+  const out = new Set<string>()
+  const sources: Array<{ col: number; row: number; sensor: number }> = []
+  for (const u of game.units) {
+    if (u.side === side) sources.push({ col: u.col, row: u.row, sensor: u.sensor })
+  }
+  for (const b of game.bases ?? []) {
+    if (b.side === side) sources.push({ col: b.col, row: b.row, sensor: b.sensor })
+  }
+  for (const s of sources) {
+    for (const cell of game.map.cells) {
+      if (hexDistance(s.col, s.row, cell.col, cell.row) <= s.sensor) {
+        out.add(`${cell.col},${cell.row}`)
+      }
+    }
+  }
+  return out
+}
+
+
+/** Show a transient toast / map popup explaining why a click was rejected.
+ *  Returns false (so commitTargetingClick callers can do `return rejectClick(...)`). */
+function rejectClick(
+  reason: string,
+  _hex: { col: number; row: number },
+  _game: GameState,
+): boolean {
+  // Lightweight UX: a top-of-page banner via the global error overlay div
+  // (already in main.tsx). It auto-fades after 1.6s.
+  showRejectionBanner(reason)
+  return false
+}
+
+
+let _bannerTimer: number | null = null
+function showRejectionBanner(text: string) {
+  let div = document.getElementById('targeting-banner') as HTMLDivElement | null
+  if (!div) {
+    div = document.createElement('div')
+    div.id = 'targeting-banner'
+    div.style.cssText = [
+      'position:fixed', 'top:60px', 'left:50%', 'transform:translateX(-50%)',
+      'background:rgba(255, 184, 77, 0.18)', 'color:#FFB84D',
+      'border:1px solid rgba(255, 184, 77, 0.7)',
+      'padding:6px 14px', 'border-radius:4px',
+      'font:11px ui-monospace,monospace', 'letter-spacing:0.08em',
+      'z-index:60', 'pointer-events:none',
+      'transition:opacity 200ms', 'opacity:1',
+    ].join(';')
+    document.body.appendChild(div)
+  }
+  div.textContent = text.toUpperCase()
+  div.style.opacity = '1'
+  if (_bannerTimer != null) window.clearTimeout(_bannerTimer)
+  _bannerTimer = window.setTimeout(() => {
+    if (div) div.style.opacity = '0'
+  }, 1600)
 }
 
 
@@ -778,13 +844,10 @@ function commitTargetingClick(
 
   switch (t.kind) {
     case 'MOVE': {
-      // Validate via lightweight reachability mirroring drawReachability.
-      if (unit.speed <= 0) return false
+      if (unit.speed <= 0) return rejectClick('stationary platform', hex, game)
       if (hex.col === unit.col && hex.row === unit.row) return false
-      // For now, accept any hex within `speed` raw hex distance. The engine
-      // will compute the actual path; we get a free server-side validation.
       if (hexDistance(unit.col, unit.row, hex.col, hex.row) > unit.speed)
-        return false
+        return rejectClick('out of move range', hex, game)
       setOrder({
         kind: 'MOVE', unit_id: unit.id,
         target_hex: [hex.col, hex.row],
@@ -792,34 +855,42 @@ function commitTargetingClick(
       return true
     }
     case 'STRIKE': {
-      if (!clickedUnit) return false
-      if (clickedUnit.side === unit.side) return false
-      if (unit.weapon <= 0) return false
+      if (!clickedUnit) return rejectClick('no target on hex', hex, game)
+      if (clickedUnit.side === unit.side) return rejectClick('friendly target', hex, game)
+      if (unit.weapon <= 0) return rejectClick('no weapons', hex, game)
       if (hexDistance(unit.col, unit.row, clickedUnit.col, clickedUnit.row) > unit.weapon)
-        return false
+        return rejectClick('out of weapon range', hex, game)
+      // Engine will silently drop a strike whose target isn't sensed by ANY
+      // friendly unit/base; pre-check the same so the user sees why.
+      const visible = computeFriendlySensorCoverage(game, unit.side)
+      const tgtKey = `${clickedUnit.col},${clickedUnit.row}`
+      if (!visible.has(tgtKey)) {
+        return rejectClick('TARGET NOT SENSED — need a UAV or forward unit', hex, game)
+      }
       setOrder({
         kind: 'STRIKE', unit_id: unit.id, target_id: clickedUnit.id,
       })
       return true
     }
     case 'SCOUT': {
-      if (unit.sensor <= 0) return false
-      // Allow any in-bounds hex; SCOUT bonus is +50% sensor for the turn.
+      if (unit.sensor <= 0) return rejectClick('no sensors', hex, game)
       const range = Math.max(1, unit.sensor + 1)
       if (hexDistance(unit.col, unit.row, hex.col, hex.row) > range + unit.sensor)
-        return false
+        return rejectClick('scout target too far', hex, game)
       setOrder({
         kind: 'SCOUT', unit_id: unit.id, target_hex: [hex.col, hex.row],
       })
       return true
     }
     case 'CAPTURE': {
-      if (!(unit.domain === 'land' || unit.domain === 'amphib')) return false
+      if (!(unit.domain === 'land' || unit.domain === 'amphib'))
+        return rejectClick('only land units can capture', hex, game)
       const isObjective = game.map.objective_hexes.some(
         (o) => o.col === hex.col && o.row === hex.row,
       )
-      if (!isObjective) return false
-      if (hexDistance(unit.col, unit.row, hex.col, hex.row) > 1) return false
+      if (!isObjective) return rejectClick('not an objective hex', hex, game)
+      if (hexDistance(unit.col, unit.row, hex.col, hex.row) > 1)
+        return rejectClick('not adjacent to objective', hex, game)
       setOrder({
         kind: 'CAPTURE', unit_id: unit.id, target_hex: [hex.col, hex.row],
       })

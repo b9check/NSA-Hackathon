@@ -1,5 +1,5 @@
 name: "Aegean Archipelago"
-seed: 139394
+seed: 258966
 turn_limit: 30
 
 # 20 cols x 15 rows. Pointy-top, odd-r offset.
@@ -34,28 +34,28 @@ victory:
 
 # Mobile platforms (auto-placed by scripts/sample_terrain.py per seed).
 units:
-  - { id: blue-cg47-1         , type: cg47            , pos: [16, 11] }
-  - { id: blue-f35-1          , type: f35a            , pos: [ 0, 12] }
-  - { id: blue-mq9-1          , type: mq9             , pos: [11, 10] }
-  - { id: blue-patriot-1      , type: patriot         , pos: [ 2, 14] }
-  - { id: blue-m1a2-1         , type: m1a2            , pos: [15,  9] }
-  - { id: blue-mech-1         , type: mech_b          , pos: [16,  8] }
-  - { id: blue-mech-2         , type: mech_b          , pos: [15,  8] }
-  - { id: red-type055-1       , type: type055         , pos: [15,  2] }
-  - { id: red-j20-1           , type: j20             , pos: [10,  2] }
-  - { id: red-recon-1         , type: recon_uav       , pos: [13,  6] }
-  - { id: red-hq9-1           , type: hq9             , pos: [16,  5] }
-  - { id: red-mech-1          , type: mech_r          , pos: [12,  0] }
-  - { id: red-mech-2          , type: mech_r          , pos: [11,  6] }
-  - { id: red-shahed-1        , type: shahed          , pos: [ 7,  0] }
-  - { id: red-shahed-2        , type: shahed          , pos: [ 6,  0] }
-  - { id: red-shahed-3        , type: shahed          , pos: [ 5,  0] }
+  - { id: blue-cg47-1         , type: cg47            , pos: [14, 12] }
+  - { id: blue-f35-1          , type: f35a            , pos: [13, 14] }
+  - { id: blue-mq9-1          , type: mq9             , pos: [ 9, 10] }
+  - { id: blue-patriot-1      , type: patriot         , pos: [15,  9] }
+  - { id: blue-m1a2-1         , type: m1a2            , pos: [ 2, 14] }
+  - { id: blue-mech-1         , type: mech_b          , pos: [12, 13] }
+  - { id: blue-mech-2         , type: mech_b          , pos: [14,  9] }
+  - { id: red-type055-1       , type: type055         , pos: [ 5,  6] }
+  - { id: red-j20-1           , type: j20             , pos: [19,  2] }
+  - { id: red-recon-1         , type: recon_uav       , pos: [17,  4] }
+  - { id: red-hq9-1           , type: hq9             , pos: [12,  0] }
+  - { id: red-mech-1          , type: mech_r          , pos: [12,  6] }
+  - { id: red-mech-2          , type: mech_r          , pos: [11,  7] }
+  - { id: red-shahed-1        , type: shahed          , pos: [ 0,  1] }
+  - { id: red-shahed-2        , type: shahed          , pos: [ 2,  2] }
+  - { id: red-shahed-3        , type: shahed          , pos: [ 2,  0] }
 
 # Fixed installations (airbase / naval base / FOB / launch site).
 bases:
-  - { id: blue-airbase-1      , type: blue_airbase    , pos: [11,  8] }
-  - { id: blue-navalbase-1    , type: blue_navalbase  , pos: [ 4,  8] }
-  - { id: blue-fob-1          , type: blue_fob        , pos: [ 3, 13] }
-  - { id: red-airbase-1       , type: red_airbase     , pos: [ 0,  1] }
-  - { id: red-navalbase-1     , type: red_navalbase   , pos: [11,  5] }
-  - { id: red-launchsite-1    , type: red_launchsite  , pos: [ 0,  0] }
+  - { id: blue-airbase-1      , type: blue_airbase    , pos: [10,  8] }
+  - { id: blue-navalbase-1    , type: blue_navalbase  , pos: [ 3, 13] }
+  - { id: blue-fob-1          , type: blue_fob        , pos: [ 8,  9] }
+  - { id: red-airbase-1       , type: red_airbase     , pos: [11,  5] }
+  - { id: red-navalbase-1     , type: red_navalbase   , pos: [16,  5] }
+  - { id: red-launchsite-1    , type: red_launchsite  , pos: [ 1,  0] }

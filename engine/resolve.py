@@ -46,6 +46,14 @@ from engine.orders import (
 from engine.state import BaseInstance, GameState, UnitInstance
 
 
+# ----- objective bonus -----
+# A side that holds an objective hex (any of its land/amphib units sitting
+# on it, no enemy on the same hex) earns this many score points per turn.
+# Hard cap so a turtle strategy can't run away with the score.
+OBJECTIVE_BONUS_PER_TURN = 5.0
+OBJECTIVE_BONUS_CAP = 30.0
+
+
 # ----- damage table (per-weapon-kind hp damage on a successful hit) -----
 DAMAGE_BY_KIND = {
     "aam": 2,
@@ -339,10 +347,9 @@ def _phase_update(
     state: GameState, orders: list[Order], game_seed: int, turn: int,
 ) -> list[Event]:
     events: list[Event] = []
-    # Capture counters: any land-domain unit on an objective hex contributes.
-    # Single-side -> +1 to its counter; contested -> reset to 0.
-    counters: dict[tuple[int, int], dict[str, int]] = {}
-    threshold = state.victory.capture_hold_turns
+    # ---- Objective bonus: +OBJECTIVE_BONUS_PER_TURN per held objective,
+    #       capped per side at OBJECTIVE_BONUS_CAP. "Held" = the side has
+    #       at least one ground unit on the hex AND the enemy doesn't.
     for o in state.map.objective_hexes:
         h = (o.col, o.row)
         sides = {u.side for u in state.units
@@ -350,11 +357,16 @@ def _phase_update(
                  and u.domain in ("land", "amphib")}
         if len(sides) == 1:
             side = next(iter(sides))
-            counters.setdefault(h, {})[side] = counters.get(h, {}).get(side, 0) + 1
-            events.append(CaptureEvent(
-                hex=h, side=side, counter=counters[h][side], threshold=threshold,
-                controller=side if counters[h][side] >= threshold else None,
-            ))
+            cur = state.objective_points.get(side, 0.0)
+            after = min(OBJECTIVE_BONUS_CAP, cur + OBJECTIVE_BONUS_PER_TURN)
+            if after > cur:
+                state.objective_points[side] = after
+                events.append(CaptureEvent(
+                    hex=h, side=side,
+                    counter=int(after),
+                    threshold=int(OBJECTIVE_BONUS_CAP),
+                    controller=side,
+                ))
 
     # Remove dead entities + emit destroyed events.
     survivors: list[UnitInstance] = []
@@ -380,9 +392,13 @@ def _phase_update(
 
 
 def compute_scores(state: GameState) -> tuple[float, float]:
-    """Cost-weighted health, normalized to ~100 at full strength.
-    Denominator is the side's STARTING combat power so the curve doesn't
-    artificially flatten when destroyed units leave state.units."""
+    """Score = cost-weighted health (100 = full strength) + objective bonus.
+
+    Combat-power denominator is the side's STARTING total so attrition
+    visibly shaves points (a side annihilated reads ~0 + objective_bonus).
+    Objective bonus caps at OBJECTIVE_BONUS_CAP so a turtle strategy can't
+    run away with the score.
+    """
     def score(side: str) -> float:
         cur = 0.0
         for u in state.units:
@@ -394,9 +410,12 @@ def compute_scores(state: GameState) -> tuple[float, float]:
                 continue
             cur += 50.0 * (b.hp / max(b.max_hp, 1))
         total = state.starting_total.get(side, 0.0)
-        if total == 0:
-            return 0.0
-        return round(100.0 * cur / total, 1)
+        base = 100.0 * cur / total if total else 0.0
+        bonus = min(
+            OBJECTIVE_BONUS_CAP,
+            state.objective_points.get(side, 0.0),
+        )
+        return round(base + bonus, 1)
     return score("blue"), score("red")
 
 

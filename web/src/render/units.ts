@@ -47,6 +47,18 @@ function hpColor(ratio: number): number {
   return COLORS.red
 }
 
+/** Repaint a unit/base's HP bar — exported so the animation pipeline can
+ *  refresh it mid-event (between syncUnits passes). */
+export function refreshHpBar(
+  node: { hpBar: Graphics; lastHp: number; lastMaxHp: number },
+  hp: number, maxHp: number, side: Side,
+) {
+  drawHpBar(node.hpBar, hp, maxHp, side)
+  node.lastHp = hp
+  node.lastMaxHp = maxHp
+}
+
+
 function drawHpBar(g: Graphics, hp: number, maxHp: number, side: Side) {
   g.clear()
   const ratio = Math.max(0, Math.min(1, hp / Math.max(maxHp, 1)))
