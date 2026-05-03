@@ -352,12 +352,16 @@ export const useStore = create<AppState>((set, get) => ({
   setPendingEvents: (events) => set({ pendingEvents: events }),
   setReplaying: (b) => set({ replaying: b }),
 
-  onReplayComplete: () => {
+  onReplayComplete: async () => {
     const hr = get().hotseatReplay
     if (!hr) {
-      // Normal flow: clear and refetch.
-      set({ pendingEvents: null, replaying: false })
-      get().refetchState().catch(() => {})
+      // Normal flow: refetch resolver truth FIRST so the next render has
+      // post-resolve unit positions, THEN unblock interaction. Otherwise
+      // a click during the brief stale window finds the wrong unit and
+      // the move-range check fires with absurd distances.
+      set({ pendingEvents: null })
+      await get().refetchState().catch(() => {})
+      set({ replaying: false })
       return
     }
     if (hr.phase === 'blue') {
@@ -371,16 +375,15 @@ export const useStore = create<AppState>((set, get) => ({
         hotseatReplay: { ...hr, phase: 'red' },
       })
     } else if (hr.phase === 'red') {
-      // Pass 2 done — refetch resolver truth and settle on BLUE.
+      // Pass 2 done — fetch the resolver's truth THEN clear replaying,
+      // so we never expose the stale pre-resolve clone to clicks.
       set({
-        replaying: false,
         pendingEvents: null,
         hotseatReplay: { ...hr, phase: 'settle' },
         viewMode: 'blue',
       })
-      get().refetchState().finally(() => {
-        set({ hotseatReplay: null })
-      })
+      await get().refetchState().catch(() => {})
+      set({ replaying: false, hotseatReplay: null })
     } else {
       // Already settling — no-op safeguard.
       set({ pendingEvents: null, replaying: false, hotseatReplay: null })

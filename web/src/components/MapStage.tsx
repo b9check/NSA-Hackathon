@@ -193,16 +193,17 @@ async function buildPixi(
     }
   })
   app.stage.on('pointerdown', (e: FederatedPointerEvent) => {
+    // Ignore clicks while the replay is mid-flight or settling — game
+    // state can be transiently out of sync with the rendered sprites.
+    const st = useStore.getState()
+    if (st.replaying || st.resolving) return
     const hex = findHexAtPixel(e.global.x, e.global.y)
     if (!hex) {
       onPointerDown(null, null)
       return
     }
-    // Read the LIVE game state, not the captured initialGame. Otherwise
-    // clicks always hit unit positions from the moment Pixi was built —
-    // so after a unit moves or dies, clicks on the new position miss it
-    // and clicks on the old position still find a stale unit.
-    const liveGame = useStore.getState().game
+    // Read the LIVE game state, not the captured initialGame.
+    const liveGame = st.game
     const units = liveGame ? liveGame.units : state.units
     const u = units.find((u) => u.col === hex.col && u.row === hex.row)
     onPointerDown(hex, u ?? null)
