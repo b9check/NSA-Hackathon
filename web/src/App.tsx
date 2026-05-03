@@ -16,9 +16,12 @@ function useWinCheck() {
   const turnInfo = useStore((s) => s.turnInfo)
   const replaying = useStore((s) => s.replaying)
   const gameOver = useStore((s) => s.gameOver)
+  const dismissed = useStore((s) => s.gameOverDismissed)
   const endMatch = useStore((s) => s.endMatch)
   useEffect(() => {
-    if (!game || !game.winner || gameOver || replaying) return
+    // Bail if no winner yet, the overlay is already up, the player
+    // explicitly dismissed it (VIEW MAP), or replay is mid-flight.
+    if (!game || !game.winner || gameOver || dismissed || replaying) return
     const startBlue = game.starting_hp?.blue ?? 0
     const startRed = game.starting_hp?.red ?? 0
     let blueHp = 0, redHp = 0
@@ -31,7 +34,7 @@ function useWinCheck() {
       red_hp_pct: startRed ? redHp / startRed : 0,
       turn: turnInfo?.turn ?? game.turn,
     })
-  }, [game?.winner, game?.win_reason, replaying, gameOver])
+  }, [game?.winner, game?.win_reason, replaying, gameOver, dismissed])
 }
 
 

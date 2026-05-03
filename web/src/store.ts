@@ -108,6 +108,10 @@ interface AppState {
   aiGameAutoplay: boolean
   /** Auto-play turn counter — used by the UI status badge. */
   aiGameTurnCount: number
+  /** Set when VIEW MAP is clicked — keeps useWinCheck from re-popping
+   *  the overlay every render. Cleared on reroll/swap/replay. */
+  gameOverDismissed: boolean
+  dismissGameOver: () => void
   /** End the current game (force-forfeit if no winner yet) + run the
    *  reflect pass to extract lessons into the memory store. */
   endGameAndReflect: (opts?: { force?: boolean }) => Promise<void>
@@ -262,6 +266,7 @@ export const useStore = create<AppState>((set, get) => ({
   aiThinking: { blue: false, red: false },
   aiGameAutoplay: false,
   aiGameTurnCount: 0,
+  gameOverDismissed: false,
   lastLessons: [],
   reflecting: false,
   showLessonsDrawer: false,
@@ -320,6 +325,7 @@ export const useStore = create<AppState>((set, get) => ({
         aiThinking: { blue: false, red: false },
         aiGameAutoplay: false,        // breaks any in-flight autoplay loop
         aiGameTurnCount: 0,
+        gameOverDismissed: false,
         lastLessons: [],
         showLessonsDrawer: false,
       })
@@ -351,6 +357,7 @@ export const useStore = create<AppState>((set, get) => ({
         aiThinking: { blue: false, red: false },
         aiGameAutoplay: false,        // breaks any in-flight autoplay loop
         aiGameTurnCount: 0,
+        gameOverDismissed: false,
         lastLessons: [],
         showLessonsDrawer: false,
       })
@@ -420,6 +427,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   dismissLessonsDrawer: () => set({ showLessonsDrawer: false }),
+
+  dismissGameOver: () => set({ gameOver: null, gameOverDismissed: true }),
 
   playSideWithAI: async (side) => {
     set((s) => ({ aiThinking: { ...s.aiThinking, [side]: true } }))
@@ -650,6 +659,15 @@ export const useStore = create<AppState>((set, get) => ({
       // history. Keyed by current scenario (name + seed); regen / swap
       // produce a different key and discard the old log on hydrate.
       persistLog(get().game, get().eventLog)
+      // If the engine declared a winner this turn, the server already
+      // ran the auto-reflect pass and shipped lessons in the response.
+      // Pop the lessons drawer so the player sees what was learned.
+      if (res?.winner && Array.isArray(res?.lessons) && res.lessons.length > 0) {
+        set({
+          lastLessons: res.lessons,
+          showLessonsDrawer: true,
+        })
+      }
     } catch (e) {
       console.error('resolveTurn failed', e)
     } finally {
@@ -702,6 +720,7 @@ export const useStore = create<AppState>((set, get) => ({
     try { localStorage.removeItem(LOG_KEY) } catch {}
     set({
       gameOver: null,
+      gameOverDismissed: false,
       eventLog: [],
       pendingOrders: {},
       targeting: null,

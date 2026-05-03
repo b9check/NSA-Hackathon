@@ -7,6 +7,7 @@ export function EndGameOverlay() {
   const reroll = useStore((s) => s.reroll)
   const resetMatch = useStore((s) => s.resetMatch)
   const refetchState = useStore((s) => s.refetchState)
+  const dismissGameOver = useStore((s) => s.dismissGameOver)
   if (!info) return null
 
   const winnerColor =
@@ -25,8 +26,9 @@ export function EndGameOverlay() {
     await refetchState()
   }
   const onDismiss = () => {
-    // Clear the overlay but keep state frozen — useful to show the final map.
-    useStore.setState({ gameOver: null })
+    // Clear the overlay AND mark the game-over dismissed so useWinCheck
+    // doesn't immediately re-pop it (game.winner is still set on state).
+    dismissGameOver()
   }
 
   return (

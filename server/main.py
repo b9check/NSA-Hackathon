@@ -185,6 +185,12 @@ class ResolveResult(BaseModel):
     events: list[dict]
     blue_score: float
     red_score: float
+    # If this resolve declared a winner, lessons extracted by the auto-
+    # reflect pass land here so the UI can pop the lessons drawer
+    # without a follow-up call.
+    winner: Optional[str] = None
+    win_reason: Optional[str] = None
+    lessons: list[dict] = []
 
 
 class SwapResult(BaseModel):
@@ -523,13 +529,54 @@ async def resolve_endpoint() -> ResolveResult:
         })
         _reset_orders()
         _persist_state()
-        return ResolveResult(
-            ok=True,
-            turn_started_at=turn_started,
-            turn_ended_at=state.turn,
-            events=[e.model_dump() for e in events],
-            blue_score=blue_score, red_score=red_score,
+        winner_now = state.winner
+        win_reason_now = state.win_reason
+        gid = _session.get("current_game_id") or "game_unknown"
+        # Detect natural game-end (winner just got set) so we can fire
+        # the auto-reflect pass once. _session.last_lessons is cleared
+        # on reroll/swap; if it's empty here AND we have a winner, this
+        # is the first resolve to declare it.
+        should_reflect = (
+            winner_now is not None
+            and not _session.get("last_lessons")
         )
+        log_rows_snapshot = list(_session["game_log"]) if should_reflect else []
+        final_state_snapshot = (
+            state.model_dump(mode="json") if should_reflect else None
+        )
+
+    # Reflect OUTSIDE the lock — Haiku call ~2s.
+    lessons_serialised: list[dict] = []
+    if should_reflect:
+        from ai.reflect import reflect_and_persist  # lazy import
+        try:
+            lessons = await reflect_and_persist(
+                log_rows_snapshot, final_state_snapshot, game_id=gid,
+            )
+            lessons_serialised = [
+                {
+                    "id": l.id, "claim": l.claim, "tags": l.tags,
+                    "side": l.side, "outcome": l.outcome,
+                }
+                for l in lessons
+            ]
+            async with _session_lock:
+                _session["last_lessons"] = lessons_serialised
+        except Exception as e:
+            # Don't fail the resolve if reflection blows up.
+            import logging
+            logging.getLogger(__name__).exception("auto-reflect failed: %r", e)
+
+    return ResolveResult(
+        ok=True,
+        turn_started_at=turn_started,
+        turn_ended_at=state.turn,
+        events=[e.model_dump() for e in events],
+        blue_score=blue_score, red_score=red_score,
+        winner=winner_now,
+        win_reason=win_reason_now,
+        lessons=lessons_serialised,
+    )
 
 
 @app.post("/api/turn/reset")
