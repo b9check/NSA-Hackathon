@@ -177,6 +177,9 @@ class OverwatchEnv(gym.Env):
         prev_visible = self.blue_seen_ever.copy()
         prev_blue_value = self._side_value("blue")
         prev_red_value = self._side_value("red")
+        prev_blue_hvt_value = self._hvt_value("blue")
+        prev_red_hvt_value = self._hvt_value("red")
+        prev_red_strike_alive = self._unit_kind_alive("red", "strike")
 
         blue_moves, blue_policies = self._decode_blue_action(action_arr)
         red_moves, red_policies = self._apply_red_scripted_opponent()
@@ -193,12 +196,20 @@ class OverwatchEnv(gym.Env):
 
         enemy_value_destroyed = prev_red_value - self._side_value("red")
         own_value_lost = prev_blue_value - self._side_value("blue")
+        enemy_hvt_value_destroyed = prev_red_hvt_value - self._hvt_value("red")
+        own_hvt_value_lost = prev_blue_hvt_value - self._hvt_value("blue")
+        red_strike_destroyed = prev_red_strike_alive and not self._unit_kind_alive("red", "strike")
         new_cells_revealed = float(np.logical_and(self.blue_seen_ever, ~prev_visible).sum())
         reward = (
             self.w_enemy * enemy_value_destroyed
             + self.w_own * own_value_lost
             + self.w_info * new_cells_revealed
             + self.w_time * 1.0
+        )
+        reward += self._shaping_reward(
+            enemy_hvt_value_destroyed=enemy_hvt_value_destroyed,
+            own_hvt_value_lost=own_hvt_value_lost,
+            red_strike_destroyed=red_strike_destroyed,
         )
 
         self.t += 1
@@ -209,6 +220,9 @@ class OverwatchEnv(gym.Env):
             {
                 "enemy_value_destroyed": float(enemy_value_destroyed),
                 "own_value_lost": float(own_value_lost),
+                "enemy_hvt_value_destroyed": float(enemy_hvt_value_destroyed),
+                "own_hvt_value_lost": float(own_hvt_value_lost),
+                "red_strike_destroyed": bool(red_strike_destroyed),
                 "new_cells_revealed": float(new_cells_revealed),
                 "combat_events": [event.__dict__ for event in self.last_events],
             }
@@ -579,6 +593,60 @@ class OverwatchEnv(gym.Env):
         unit_value = sum(u.value * (u.hp / u.max_hp) for u in self.units if u.side == side and u.alive)
         hvt_value = sum(h.value for h in self.hvts if h.side == side and h.alive)
         return float(unit_value + hvt_value)
+
+    def _hvt_value(self, side: str) -> float:
+        return float(sum(h.value for h in self.hvts if h.side == side and h.alive))
+
+    def _unit_kind_alive(self, side: str, kind: str) -> bool:
+        return any(u.side == side and u.kind == kind and u.alive for u in self.units)
+
+    def _shaping_reward(
+        self,
+        *,
+        enemy_hvt_value_destroyed: float,
+        own_hvt_value_lost: float,
+        red_strike_destroyed: bool,
+    ) -> float:
+        """Small direct incentives that make intent easier to learn.
+
+        The base reward still carries the commander weights. These terms expose
+        important events more sharply so PPO does not need huge compute to infer
+        that HVT survival, red HVT kills, red strike kills, and radar exposure
+        matter.
+        """
+        shaped = 0.0
+        shaped += self.w_enemy * enemy_hvt_value_destroyed * 0.75
+        shaped += self.w_own * own_hvt_value_lost * 1.25
+        if red_strike_destroyed:
+            shaped += self.w_enemy * 5.0
+
+        own_anchor = self._own_hvt_anchor()
+        if own_anchor is not None:
+            for kind in ("strike", "sam"):
+                unit = next(
+                    (u for u in self.units if u.side == "blue" and u.kind == kind and u.alive),
+                    None,
+                )
+                if unit is not None and self._manhattan(unit.x, unit.y, own_anchor[0], own_anchor[1]) <= 3:
+                    shaped += abs(self.w_own) * 0.2
+
+        blue_sam = self._unit_by_id("blue-sam")
+        if (
+            blue_sam is not None
+            and blue_sam.alive
+            and self.blue_sam_emit
+            and self.red_visible[blue_sam.y, blue_sam.x]
+        ):
+            shaped -= 0.25 + abs(self.w_own) * 0.25
+        return float(shaped)
+
+    def _own_hvt_anchor(self) -> tuple[int, int] | None:
+        hvts = [h for h in self.hvts if h.side == "blue" and h.alive]
+        if not hvts:
+            return None
+        x = round(sum(h.x for h in hvts) / len(hvts))
+        y = round(sum(h.y for h in hvts) / len(hvts))
+        return int(x), int(y)
 
     def _can_enter(self, unit: RLUnit, x: int, y: int, occupied: set[tuple[int, int]]) -> bool:
         if not self._in_bounds(x, y):

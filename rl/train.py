@@ -18,6 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timesteps", type=int, default=500_000)
     parser.add_argument("--save-path", default="rl/overwatch_agent")
+    parser.add_argument("--load-path", default="")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--log-dir", default="rl/logs")
     parser.add_argument("--checkpoint-freq", type=int, default=50_000)
@@ -28,7 +29,10 @@ def main() -> None:
     args = parse_args()
     Path(args.log_dir).mkdir(parents=True, exist_ok=True)
     env = Monitor(OverwatchEnv(), filename=str(Path(args.log_dir) / "monitor.csv"))
-    model = PPO("MlpPolicy", env, verbose=1, n_steps=2048, seed=args.seed)
+    if args.load_path:
+        model = PPO.load(args.load_path, env=env, verbose=1)
+    else:
+        model = PPO("MlpPolicy", env, verbose=1, n_steps=2048, seed=args.seed)
     callback = None
     if args.checkpoint_freq > 0:
         checkpoint_dir = Path(args.log_dir) / "checkpoints"
