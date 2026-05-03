@@ -293,7 +293,15 @@ export const useStore = create<AppState>((set, get) => ({
         // Snapshot the pre-resolve state so each pass starts from the
         // same baseline. MapStage's onReplayComplete advances the
         // phases (blue -> red -> settle).
-        const snapshot = JSON.parse(JSON.stringify(baseState)) as GameState
+        //
+        // CRITICAL: keep the pristine snapshot SEPARATE from the game
+        // state pass 1 animates against. playEvents mutates HP/positions
+        // on the game it's handed; if we shared the same reference,
+        // pass 2 would clone the post-pass-1 (mutated) state and have
+        // nothing to animate.
+        const json = JSON.stringify(baseState)
+        const pass1Game = JSON.parse(json) as GameState
+        const pristine = JSON.parse(json) as GameState
         set({
           pendingOrders: {},
           targeting: null,
@@ -301,11 +309,11 @@ export const useStore = create<AppState>((set, get) => ({
           eventLog: [...get().eventLog, ...annotated].slice(-200),
           selectedUnitId: null,
           viewMode: 'blue',
-          game: snapshot,
+          game: pass1Game,
           hotseatReplay: {
             phase: 'blue',
             events: [...events],
-            snapshot,
+            snapshot: pristine,
           },
         })
       } else {
