@@ -78,6 +78,8 @@ interface AppState {
   swapRegion: (key: string) => Promise<void>
   reroll: () => Promise<void>
   refetchState: () => Promise<void>
+  /** Free action — flip a unit's radar ON/OFF, then refetch state.
+   *  Doesn't consume a turn order; persists immediately on the server. */
   toggleSensor: (unitId: string, sensorKey: string, active: boolean) => Promise<void>
 
   // ---- Turn flow -------------------------------------------------
@@ -130,6 +132,31 @@ const REAL_GAME_KEY = 'wargame.realGame'
 const initialRealGame = (() => {
   try { return localStorage.getItem(REAL_GAME_KEY) === '1' } catch { return false }
 })()
+
+// Persist the battle log so a page reload mid-match doesn't wipe history.
+// Stored as { name, seed, log } JSON; only restored when the loaded
+// scenario's (name, seed) match — otherwise discarded (regen / swap).
+const LOG_KEY = 'wargame.eventLog'
+function persistLog(game: GameState | null, log: AnnotatedEvent[]) {
+  try {
+    if (!game) { localStorage.removeItem(LOG_KEY); return }
+    localStorage.setItem(LOG_KEY, JSON.stringify({
+      name: game.name, seed: game.seed, log,
+    }))
+  } catch {}
+}
+function loadPersistedLog(game: GameState | null): AnnotatedEvent[] {
+  if (!game) return []
+  try {
+    const raw = localStorage.getItem(LOG_KEY)
+    if (!raw) return []
+    const p = JSON.parse(raw)
+    if (p && p.name === game.name && p.seed === game.seed && Array.isArray(p.log)) {
+      return p.log
+    }
+    return []
+  } catch { return [] }
+}
 
 export const useStore = create<AppState>((set, get) => ({
   game: null,
@@ -191,6 +218,7 @@ export const useStore = create<AppState>((set, get) => ({
       // Bumping the version triggers App + MapStage to refetch / remount.
       // Also clear per-match state (event log + queued orders + game-over)
       // so the footer doesn't show events from a different scenario.
+      try { localStorage.removeItem(LOG_KEY) } catch {}
       set({
         assetVersion: get().assetVersion + 1,
         selectedUnitId: null,
@@ -215,6 +243,7 @@ export const useStore = create<AppState>((set, get) => ({
       await fetchJson('/api/reroll', { method: 'POST' })
       // Same per-match reset as swapRegion — fresh seed = new scenario,
       // old battle log no longer applies.
+      try { localStorage.removeItem(LOG_KEY) } catch {}
       set({
         assetVersion: get().assetVersion + 1,
         selectedUnitId: null,
@@ -232,23 +261,34 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  toggleSensor: async (unitId, sensorKey, active) => {
+    try {
+      await fetchJson('/api/sensor/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unit_id: unitId, sensor_key: sensorKey, active }),
+      })
+      await get().refetchState()
+    } catch (e) {
+      console.error('toggleSensor failed', e)
+    }
+  },
+
   refetchState: async () => {
     const v = get().assetVersion
     const game = await fetchJson<GameState>('/state.json?v=' + v)
-    set({ game })
-    // Pull turn meta in parallel; don't block on failure.
+    // First load (no events in memory): hydrate the battle log from
+    // localStorage if it matches this scenario. Subsequent refetches
+    // (after a resolve) leave the in-memory log alone — we already
+    // appended the new events in resolveTurn.
+    const cur = get()
+    const next: Partial<AppState> = { game }
+    if (cur.eventLog.length === 0) {
+      const persisted = loadPersistedLog(game)
+      if (persisted.length > 0) next.eventLog = persisted
+    }
+    set(next as any)
     get().refetchTurn().catch(() => {})
-  },
-
-  toggleSensor: async (unitId, sensorKey, active) => {
-    await fetchJson('/api/sensor/toggle', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unit_id: unitId, sensor_key: sensorKey, active }),
-    })
-    // Bump asset version so the next refetch dodges the static file cache.
-    set({ assetVersion: get().assetVersion + 1 })
-    await get().refetchState()
   },
 
   refetchTurn: async () => {
@@ -354,6 +394,10 @@ export const useStore = create<AppState>((set, get) => ({
           viewMode: 'omniscient',
         })
       }
+      // Persist log after each resolve so a reload mid-match keeps
+      // history. Keyed by current scenario (name + seed); regen / swap
+      // produce a different key and discard the old log on hydrate.
+      persistLog(get().game, get().eventLog)
     } catch (e) {
       console.error('resolveTurn failed', e)
     } finally {
@@ -402,14 +446,17 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  resetMatch: () => set({
-    gameOver: null,
-    eventLog: [],
-    pendingOrders: {},
-    targeting: null,
-    selectedUnitId: null,
-    hotseatReplay: null,
-  }),
+  resetMatch: () => {
+    try { localStorage.removeItem(LOG_KEY) } catch {}
+    set({
+      gameOver: null,
+      eventLog: [],
+      pendingOrders: {},
+      targeting: null,
+      selectedUnitId: null,
+      hotseatReplay: null,
+    })
+  },
 
   endMatch: (info) => set({ gameOver: info }),
 }))

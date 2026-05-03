@@ -32,9 +32,12 @@ class SensorRef(BaseModel):
     detects_stealth: bool = True
     target_domains: list[str] = Field(default_factory=list)
     emits: bool = False
-    notes: str = ""
-    # Toggle: only meaningful for `radar` modality. Passive sensors are always on.
+    # Whether this sensor is currently powered/contributing to the unit's
+    # summary sensor range. Passive sensors (eo / ir / sigint / sonar)
+    # are always on; radars default OFF and the player toggles them via
+    # POST /api/sensor/toggle as a free action.
     is_active: bool = True
+    notes: str = ""
 
 
 class WeaponRef(BaseModel):

@@ -338,7 +338,7 @@ def write_yaml(yaml_path: Path, terrain: list[list[str]],
 
     text = f"""name: "{name}"
 seed: {seed}
-turn_limit: 30
+turn_limit: 20
 
 # 20 cols x 15 rows. Pointy-top, odd-r offset.
 # Terrain auto-derived from web/public/terrain.png by scripts/sample_terrain.py.
@@ -351,7 +351,7 @@ map:
 
 victory:
   hp_loss_threshold: 0.25
-  turn_cap: 30
+  turn_cap: 20
 
 # Mobile units (auto-placed by scripts/sample_terrain.py per seed).
 units:

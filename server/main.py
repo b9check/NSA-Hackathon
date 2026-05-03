@@ -490,32 +490,46 @@ async def reset_turn() -> dict:
     return {"ok": True}
 
 
-class SensorToggleBody(BaseModel):
+class SensorToggleReq(BaseModel):
     unit_id: str
-    sensor_key: str = ""   # empty = toggle all togglable (radar) sensors
+    sensor_key: str    # SensorRef.key on the unit (e.g. "radar_3", "radar_4")
     active: bool
 
 
 @app.post("/api/sensor/toggle")
-async def toggle_sensor(body: SensorToggleBody) -> dict:
-    """Immediately set is_active on a unit's radar sensor(s). Free action,
-    not gated by turn submission. Refreshes the unit's `sensor` summary so
-    visibility is recomputed without needing a resolve."""
-    state = _ensure_state()
-    unit = next((u for u in state.units if u.id == body.unit_id), None)
-    if not unit:
-        raise HTTPException(404, f"unit {body.unit_id} not found")
-    touched = 0
-    for s in unit.sensors:
-        if s.modality != "radar":
-            continue   # only radars are togglable
-        if body.sensor_key and s.key != body.sensor_key:
-            continue
-        s.is_active = bool(body.active)
-        touched += 1
-    if touched == 0:
-        raise HTTPException(400, "no togglable radar sensor matched")
-    # Recompute summary range from active sensors only
-    unit.sensor = max((s.range for s in unit.sensors if s.is_active), default=0)
-    _persist_state()
-    return {"ok": True, "unit_id": unit.id, "sensor_summary_range": unit.sensor}
+async def sensor_toggle(req: SensorToggleReq) -> dict:
+    """Free action — flip a unit's radar ON/OFF. Recomputes the unit's
+    summary sensor range (passive max + active radars), persists the
+    state.json so the next refetch reflects it. NOT a turn order; takes
+    effect immediately."""
+    async with _session_lock:
+        state = _ensure_state()
+        unit = state.unit_by_id(req.unit_id)
+        if unit is None:
+            raise HTTPException(404, f"unknown unit {req.unit_id!r}")
+        # Find the sensor by key (passive sensors are always_on; toggling
+        # them is a no-op but harmless).
+        found = False
+        for s in unit.sensors:
+            if s.key == req.sensor_key:
+                s.is_active = bool(req.active)
+                found = True
+                break
+        if not found:
+            raise HTTPException(
+                404, f"unit {req.unit_id!r} has no sensor {req.sensor_key!r}",
+            )
+        # Recompute summary range = max range across only the currently-
+        # active sensors. Frontend visibility / overlay code reads
+        # unit.sensor and stays in sync.
+        unit.sensor = max(
+            (s.range for s in unit.sensors if s.is_active), default=0,
+        )
+        _persist_state()
+        return {
+            "ok": True,
+            "unit_id": unit.id,
+            "sensor_key": req.sensor_key,
+            "is_active": req.active,
+            "summary_sensor": unit.sensor,
+        }

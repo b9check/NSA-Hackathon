@@ -1,4 +1,3 @@
-import * as React from 'react'
 import { useStore } from '../store'
 import type { BaseInstance, SensorRef, UnitInstance, WeaponRef } from '../types'
 import { ActionMenu } from './ActionMenu'
@@ -92,13 +91,8 @@ function FactionPill({ side }: { side: 'blue' | 'red' }) {
 export function RightRail() {
   const game = useStore((s) => s.game)
   const selectedUnitId = useStore((s) => s.selectedUnitId)
-  const selectUnit = useStore((s) => s.selectUnit)
   if (!game) return null
   const selected = game.units.find((u) => u.id === selectedUnitId) ?? null
-  const blue = game.units.filter((u) => u.side === 'blue')
-  const red = game.units.filter((u) => u.side === 'red')
-  const blueBases = (game.bases ?? []).filter((b) => b.side === 'blue')
-  const redBases = (game.bases ?? []).filter((b) => b.side === 'red')
 
   return (
     <div className="w-[360px] bg-panel border-l border-line flex flex-col h-full text-sm min-h-0">
@@ -288,7 +282,7 @@ function UnitDetail({ unit }: { unit: UnitInstance }) {
         <Stat label="GLYPH"  value={unit.glyph} />
       </div>
       {unit.sensors.length > 0 && (
-        <SensorList unitId={unit.id} sensors={unit.sensors} canCommand={canCommand} />
+        <SensorList unit={unit} canCommand={canCommand} />
       )}
       {unit.weapons.length > 0 && (
         <SubsystemList
@@ -324,79 +318,65 @@ function humanKind(k: WeaponRef['kind']): string {
   } as Record<string, string>)[k] ?? k.toUpperCase()
 }
 
-function weaponMeta(w: WeaponRef): string {
-  const parts: string[] = [`r${w.range}`, `${w.damage}dmg`]
-  if (w.ammo > 0) parts.push(`${w.ammo}rd`)
-  if (w.ammo === -1) parts.push('∞')
-  if (w.self_destruct) parts.push('SD')
-  return parts.join(' · ')
-}
 
-function SensorList({
-  unitId, sensors, canCommand,
-}: {
-  unitId: string
-  sensors: SensorRef[]
-  canCommand: boolean
-}) {
+function SensorList({ unit, canCommand }: { unit: UnitInstance; canCommand: boolean }) {
   const toggleSensor = useStore((s) => s.toggleSensor)
-  const [pendingKey, setPendingKey] = React.useState<string | null>(null)
-  const onToggle = async (key: string, active: boolean) => {
-    setPendingKey(key)
-    try {
-      await toggleSensor(unitId, key, active)
-    } finally {
-      setPendingKey(null)
-    }
-  }
   return (
-    <div className="min-w-0">
-      <div className="text-[10px] tracking-widest text-mute mb-1.5 font-mono">SENSORS</div>
+    <div>
+      <div className="text-[10px] tracking-[0.18em] text-mute mb-1">SENSORS</div>
       <div className="space-y-1">
-        {sensors.map((s) => {
+        {unit.sensors.map((s) => {
           const togglable = s.modality === 'radar'
-          const on = s.is_active
+          const meta = `range ${s.range}${s.emits ? ' · emits' : ''}${s.los_required ? ' · LOS' : ''}`
           return (
-            <div key={s.key} className="border border-line rounded-sm px-2 py-1 min-w-0">
-              <div className="flex items-baseline justify-between gap-2 min-w-0">
-                <span className="text-[11px] text-fg truncate min-w-0 flex-1">
-                  {s.display}
-                </span>
-                <span
-                  className={`shrink-0 text-[9px] font-mono uppercase tracking-wider ${SENSOR_BADGE[s.modality] ?? 'text-mute'}`}
+            <div
+              key={s.key}
+              className="flex items-center gap-2 px-2 py-1 rounded-sm bg-panel2/40 border border-line/60 text-[11px] font-mono"
+            >
+              <span className={`shrink-0 text-[10px] tracking-widest ${SENSOR_BADGE[s.modality] ?? 'text-mute'}`}>
+                {s.modality.toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-fg truncate">{s.display}</div>
+                <div className="text-mute text-[10px]">{meta}</div>
+              </div>
+              {togglable ? (
+                <button
+                  disabled={!canCommand}
+                  onClick={() => toggleSensor(unit.id, s.key, !s.is_active)}
+                  title={canCommand
+                    ? (s.is_active ? 'Radar ON — click to power down' : 'Radar OFF — click to power up')
+                    : 'Switch to your side to toggle this radar'
+                  }
+                  className={[
+                    'shrink-0 h-6 px-2 rounded-sm border text-[9px] font-semibold tracking-widest transition-colors',
+                    s.is_active
+                      ? 'border-amber text-amber bg-amber/10 hover:bg-amber/20'
+                      : 'border-line text-mute hover:text-fg hover:bg-panel2',
+                    !canCommand && 'opacity-40 cursor-not-allowed',
+                  ].filter(Boolean).join(' ')}
                 >
-                  {s.modality}
+                  {s.is_active ? '● ON' : '○ OFF'}
+                </button>
+              ) : (
+                <span className="shrink-0 text-[9px] tracking-widest text-mute opacity-60 px-2">
+                  PASSIVE
                 </span>
-              </div>
-              <div className="flex items-center justify-between mt-0.5 gap-2">
-                <span className="text-[10px] font-mono text-mute">
-                  range {s.range}{s.emits ? ' · emits' : ''}{s.los_required ? ' · LOS' : ''}
-                </span>
-                {togglable ? (
-                  <button
-                    disabled={!canCommand || pendingKey === s.key}
-                    onClick={() => onToggle(s.key, !on)}
-                    className={`shrink-0 text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-sm border transition ${
-                      on
-                        ? 'border-amber/60 text-amber bg-amber/10'
-                        : 'border-line text-mute hover:border-blue/60 hover:text-blue'
-                    } ${!canCommand ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-                    title={canCommand ? (on ? 'Click to turn OFF' : 'Click to turn ON') : 'Other side'}
-                  >
-                    {on ? 'ON' : 'OFF'}
-                  </button>
-                ) : (
-                  <span className="shrink-0 text-[9px] font-mono uppercase tracking-wider text-mute">
-                    PASSIVE
-                  </span>
-                )}
-              </div>
+              )}
             </div>
           )
         })}
       </div>
     </div>
   )
+}
+
+function weaponMeta(w: WeaponRef): string {
+  const parts: string[] = [`r${w.range}`, `${w.damage}dmg`]
+  if (w.ammo > 0) parts.push(`${w.ammo}rd`)
+  if (w.ammo === -1) parts.push('∞')
+  if (w.self_destruct) parts.push('SD')
+  return parts.join(' · ')
 }
 
 function SubsystemList({
